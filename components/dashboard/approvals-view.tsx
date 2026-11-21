@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   ShieldCheck,
   CheckCircle2,
@@ -13,7 +14,11 @@ import {
   AlertTriangle,
   AlertCircle,
 } from "lucide-react";
-import { executeFinalApproval } from "@/app/actions/approvals";
+import {
+  ApprovalDecisionModal,
+  ApprovalDecisionType,
+  ApprovalSubmissionItem,
+} from "@/components/dashboard/approval-decision-modal";
 
 export interface ApprovalItem {
   id: string;
@@ -34,47 +39,26 @@ interface ApprovalsViewProps {
 export function ApprovalsView({ userEmail, initialApprovals }: ApprovalsViewProps) {
   const [approvals, setApprovals] = useState<ApprovalItem[]>(initialApprovals);
   const [notice, setNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
-  const [isProcessing, setIsProcessing] = useState<string | null>(null);
+  const [activeModal, setActiveModal] = useState<{
+    submission: ApprovalItem;
+    decisionType: ApprovalDecisionType;
+  } | null>(null);
 
-  const handleAction = async (id: string, action: "APPROVED" | "REVISION" | "REJECTED", title: string) => {
-    setIsProcessing(id);
+  const handleOpenDecision = (item: ApprovalItem, decisionType: ApprovalDecisionType) => {
     setNotice(null);
+    setActiveModal({ submission: item, decisionType });
+  };
 
-    try {
-      if (action === "APPROVED") {
-        const res = await executeFinalApproval(id, "Validé définitivement par le Super Administrateur.");
-        if (res.success) {
-          setApprovals((prev) => prev.filter((a) => a.id !== id));
-          setNotice({
-            type: "success",
-            message: `Livrable "${title}" validé définitivement par le Super Administrateur.`,
-          });
-        } else {
-          setNotice({ type: "error", message: res.message });
-        }
-      } else {
-        const reason = window.prompt(
-          action === "REVISION" ? "Motif de la demande de révision :" : "Motif du rejet officiel :",
-          action === "REVISION" ? "Modifications techniques requises." : "Non conforme aux critères UEC."
-        );
-        if (!reason) {
-          setIsProcessing(null);
-          return;
-        }
-
-        setApprovals((prev) => prev.filter((a) => a.id !== id));
-        setNotice({
-          type: "success",
-          message: action === "REVISION"
-            ? `Demande de révision transmise pour "${title}".`
-            : `Livrable "${title}" rejeté.`,
-        });
-      }
-    } catch (err: any) {
-      setNotice({ type: "error", message: err.message || "Erreur de traitement" });
-    } finally {
-      setIsProcessing(null);
-    }
+  const handleDecisionSuccess = (
+    submissionId: string,
+    decisionType: ApprovalDecisionType,
+    message: string
+  ) => {
+    setApprovals((prev) => prev.filter((a) => a.id !== submissionId));
+    setNotice({
+      type: "success",
+      message,
+    });
   };
 
   return (
@@ -144,10 +128,12 @@ export function ApprovalsView({ userEmail, initialApprovals }: ApprovalsViewProp
 
         <CardContent className="p-0">
           {approvals.length === 0 ? (
-            <div className="py-12 text-center text-slate-400">
-              <CheckCircle2 size={36} className="text-emerald-400 mx-auto mb-2 opacity-80" />
-              <p className="text-sm font-medium">Toutes les approbations sont à jour.</p>
-              <p className="text-xs text-slate-400 mt-1">Aucun livrable en attente de décision dans la base PostgreSQL.</p>
+            <div className="p-6">
+              <EmptyState
+                icon={CheckCircle2}
+                title="Toutes les approbations sont à jour"
+                description="Aucun livrable en attente de décision finale dans la file Super Admin. Les projets avancent selon les standards UEC."
+              />
             </div>
           ) : (
             <div className="divide-y divide-[#1F2937]">
@@ -184,8 +170,7 @@ export function ApprovalsView({ userEmail, initialApprovals }: ApprovalsViewProp
                       <Button
                         variant="danger"
                         size="sm"
-                        disabled={isProcessing === item.id}
-                        onClick={() => handleAction(item.id, "REJECTED", item.taskTitle)}
+                        onClick={() => handleOpenDecision(item, "REJECTED")}
                         className="text-xs bg-rose-700 hover:bg-rose-800"
                       >
                         <XCircle size={14} className="mr-1" />
@@ -194,8 +179,7 @@ export function ApprovalsView({ userEmail, initialApprovals }: ApprovalsViewProp
                       <Button
                         variant="outline"
                         size="sm"
-                        disabled={isProcessing === item.id}
-                        onClick={() => handleAction(item.id, "REVISION", item.taskTitle)}
+                        onClick={() => handleOpenDecision(item, "REVISION")}
                         className="text-xs text-amber-300 border-amber-800 hover:bg-amber-950/40"
                       >
                         <RotateCcw size={14} className="mr-1" />
@@ -204,12 +188,11 @@ export function ApprovalsView({ userEmail, initialApprovals }: ApprovalsViewProp
                       <Button
                         variant="primary"
                         size="sm"
-                        disabled={isProcessing === item.id}
-                        onClick={() => handleAction(item.id, "APPROVED", item.taskTitle)}
+                        onClick={() => handleOpenDecision(item, "APPROVED")}
                         className="text-xs bg-emerald-600 hover:bg-emerald-500 border-emerald-500/50"
                       >
                         <CheckCircle2 size={14} className="mr-1" />
-                        {isProcessing === item.id ? "Validation..." : "Valider Définitivement"}
+                        Valider Définitivement
                       </Button>
                     </div>
                   </div>
@@ -219,6 +202,17 @@ export function ApprovalsView({ userEmail, initialApprovals }: ApprovalsViewProp
           )}
         </CardContent>
       </Card>
+
+      {/* Decision Modal */}
+      {activeModal && (
+        <ApprovalDecisionModal
+          isOpen={true}
+          onClose={() => setActiveModal(null)}
+          submission={activeModal.submission}
+          decisionType={activeModal.decisionType}
+          onSuccess={handleDecisionSuccess}
+        />
+      )}
     </div>
   );
 }

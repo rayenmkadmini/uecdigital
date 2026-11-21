@@ -225,11 +225,12 @@ export function MembersView({ members, departments, currentUserRole }: MembersVi
 
       {/* Modal for Super Admin member management */}
       {selectedMember && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="bg-[#111827] border border-[#27354F] rounded-xl max-w-md w-full p-6 shadow-2xl relative">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-150">
+          <div className="bg-[#0e0e12] border border-white/10 rounded-2xl max-w-md w-full p-6 shadow-2xl shadow-black/90 relative">
             <button
               onClick={closeModal}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white"
+              className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors focus:outline-none focus:ring-2 focus:ring-uec-blue"
+              aria-label="Fermer"
             >
               <X size={18} />
             </button>

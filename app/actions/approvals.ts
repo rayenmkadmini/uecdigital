@@ -96,7 +96,7 @@ export async function executeFinalApproval(
       submission_id: submissionId,
       task_id: typedSubmission.task_id,
       actor_id: user.id,
-      action: "APPROVED",
+      action: "SUPER_ADMIN_APPROVED",
       decision_reason: validNotes,
     });
 
@@ -247,11 +247,16 @@ export async function submitCoordinatorReview(
       .eq("id", typedSubmission.task_id);
 
     // Approval history
+    const historyAction =
+      validAction.data === "SUBMIT_TO_SUPER_ADMIN"
+        ? "COORDINATOR_FORWARDED"
+        : "COORDINATOR_REQUESTED_REVISION";
+
     await (supabase.from("approval_history") as any).insert({
       submission_id: submissionId,
       task_id: typedSubmission.task_id,
       actor_id: user.id,
-      action: newSubStatus,
+      action: historyAction,
       decision_reason: `Revue coordinateur (${profile.full_name}) : ${validNotes.data}`,
     });
 
@@ -347,7 +352,7 @@ export async function rejectSubmissionAction(
       submission_id: submissionId,
       task_id: submission.task_id,
       actor_id: user.id,
-      action: "REJECTED",
+      action: "SUPER_ADMIN_REJECTED",
       decision_reason: validReason.data,
     });
 

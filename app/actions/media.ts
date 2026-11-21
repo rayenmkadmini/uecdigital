@@ -4,7 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile, AuthorizationError } from "@/lib/auth/rbac";
-import type { MediaCategory } from "@/lib/data/media";
+import { type MediaCategory, toDbMediaCategory } from "@/lib/data/media";
 
 const UuidSchema = z.string().uuid("ID invalide");
 
@@ -64,7 +64,7 @@ export async function recordMediaFileAction(rawInput: unknown): Promise<ActionRe
         bucket_name: data.bucket_name,
         file_size: data.file_size,
         mime_type: data.mime_type,
-        category: data.category,
+        category: toDbMediaCategory(data.category),
         department_id: data.department_id || null,
         project_id: data.project_id || null,
         uploaded_by: user.id,
@@ -146,7 +146,7 @@ export async function updateMediaFileAction(mediaId: string, rawInput: unknown):
       updated_at: new Date().toISOString(),
     };
     if (data.title !== undefined) updatePayload.title = data.title;
-    if (data.category !== undefined) updatePayload.category = data.category;
+    if (data.category !== undefined) updatePayload.category = toDbMediaCategory(data.category);
     if (data.department_id !== undefined) updatePayload.department_id = data.department_id;
     if (data.project_id !== undefined) updatePayload.project_id = data.project_id;
     if (data.is_public_within_team !== undefined) updatePayload.is_public_within_team = data.is_public_within_team;

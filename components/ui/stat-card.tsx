@@ -25,43 +25,59 @@ export function StatCard({
   accentColor = "blue",
   className,
 }: StatCardProps) {
-  const accentGlow = {
-    red: "hover:border-uec-red/40 group-hover:text-uec-red",
-    blue: "hover:border-uec-blue/40 group-hover:text-uec-blue",
-    cyan: "hover:border-uec-cyan/40 group-hover:text-uec-cyan",
-    gold: "hover:border-amber-500/40 group-hover:text-amber-400",
-    green: "hover:border-emerald-500/40 group-hover:text-emerald-400",
+  const accentBorders = {
+    red: "hover:border-uec-red/50 hover:shadow-uec-red/10",
+    blue: "hover:border-uec-blue/50 hover:shadow-uec-blue/10",
+    cyan: "hover:border-uec-cyan/50 hover:shadow-uec-cyan/10",
+    gold: "hover:border-amber-500/50 hover:shadow-amber-500/10",
+    green: "hover:border-emerald-500/50 hover:shadow-emerald-500/10",
+  };
+
+  const topGlowLines = {
+    red: "from-transparent via-uec-red to-transparent",
+    blue: "from-transparent via-uec-blue to-transparent",
+    cyan: "from-transparent via-uec-cyan to-transparent",
+    gold: "from-transparent via-amber-400 to-transparent",
+    green: "from-transparent via-emerald-400 to-transparent",
   };
 
   const iconColors = {
-    red: "text-uec-red bg-uec-red/10 border-uec-red/20",
-    blue: "text-uec-blue bg-uec-blue/10 border-uec-blue/20",
-    cyan: "text-uec-cyan bg-uec-cyan/10 border-uec-cyan/20",
-    gold: "text-amber-400 bg-amber-400/10 border-amber-400/20",
-    green: "text-emerald-400 bg-emerald-400/10 border-emerald-400/20",
+    red: "text-red-400 bg-red-950/40 border-red-800/40 shadow-sm shadow-red-950/50",
+    blue: "text-blue-400 bg-blue-950/40 border-blue-800/40 shadow-sm shadow-blue-950/50",
+    cyan: "text-cyan-400 bg-cyan-950/40 border-cyan-800/40 shadow-sm shadow-cyan-950/50",
+    gold: "text-amber-400 bg-amber-950/40 border-amber-800/40 shadow-sm shadow-amber-950/50",
+    green: "text-emerald-400 bg-emerald-950/40 border-emerald-800/40 shadow-sm shadow-emerald-950/50",
   };
 
   return (
     <div
       className={cn(
-        "group relative bg-[#111827] border border-[#1F2937] rounded-xl p-5 shadow-lg shadow-black/30 transition-all duration-200 hover:-translate-y-0.5",
-        accentGlow[accentColor],
+        "group relative bg-[#0e0e12]/90 hover:bg-[#111827] border border-white/10 rounded-xl p-5 shadow-lg shadow-black/40 transition-all duration-300 hover:-translate-y-0.5 overflow-hidden backdrop-blur-sm",
+        accentBorders[accentColor],
         className
       )}
     >
-      <div className="flex items-start justify-between">
-        <div className="space-y-1">
-          <p className="text-xs font-medium text-uec-muted uppercase tracking-wider">
+      {/* Top subtle ambient highlight */}
+      <div
+        className={cn(
+          "absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r opacity-0 group-hover:opacity-100 transition-opacity duration-500",
+          topGlowLines[accentColor]
+        )}
+      />
+
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1.5 flex-1 min-w-0">
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider truncate">
             {title}
           </p>
-          <div className="text-2xl font-bold text-uec-text tracking-tight">
+          <div className="text-2xl lg:text-3xl font-extrabold text-white tracking-tight">
             {value}
           </div>
         </div>
         {icon && (
           <div
             className={cn(
-              "h-10 w-10 rounded-lg flex items-center justify-center border",
+              "h-11 w-11 rounded-xl flex items-center justify-center border shrink-0 transition-transform duration-300 group-hover:scale-105",
               iconColors[accentColor]
             )}
           >
@@ -71,16 +87,19 @@ export function StatCard({
       </div>
 
       {(description || trend) && (
-        <div className="mt-3 pt-3 border-t border-[#1F2937]/60 flex items-center justify-between text-xs text-uec-muted">
-          {description && <span>{description}</span>}
+        <div className="mt-3.5 pt-3 border-t border-white/5 flex items-center justify-between text-xs text-slate-400">
+          {description && <span className="truncate pr-2 rtl:pr-0 rtl:pl-2">{description}</span>}
           {trend && (
             <span
               className={cn(
-                "font-semibold flex items-center gap-1",
-                trend.isPositive ? "text-emerald-400" : "text-amber-400"
+                "inline-flex items-center gap-1 font-semibold px-2 py-0.5 rounded-full text-[11px] shrink-0",
+                trend.isPositive
+                  ? "text-emerald-400 bg-emerald-950/50 border border-emerald-800/40"
+                  : "text-amber-400 bg-amber-950/50 border border-amber-800/40"
               )}
             >
-              {trend.isPositive ? "↑" : "↓"} {trend.value}
+              <span>{trend.isPositive ? "↑" : "↓"}</span>
+              <span>{trend.value}</span>
             </span>
           )}
         </div>

@@ -4,14 +4,20 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile, AuthorizationError } from "@/lib/auth/rbac";
-import type { CalendarWorkflowStatus, ContentPlatform, ContentType } from "@/lib/data/calendar";
+import {
+  type CalendarWorkflowStatus,
+  type ContentPlatform,
+  type ContentType,
+  toDbCalendarStatus,
+  toDbPlatform,
+} from "@/lib/data/calendar";
 
 const UuidSchema = z.string().uuid("ID invalide");
 
 const CalendarItemCreateSchema = z.object({
   title: z.string().min(3, "Le titre doit comporter au moins 3 caractères").max(150),
   description: z.string().optional().nullable(),
-  platform: z.enum(["INSTAGRAM", "FACEBOOK", "TIKTOK", "LINKEDIN", "TWITTER", "WEBSITE", "OTHER"]),
+  platform: z.enum(["INSTAGRAM", "FACEBOOK", "TIKTOK", "LINKEDIN", "TWITTER", "YOUTUBE", "WEBSITE", "OTHER"]),
   content_type: z.enum(["POST", "REEL", "STORY", "ARTICLE", "COMMUNIQUE", "VIDEO", "CAROUSEL"]).default("POST"),
   scheduled_date: z.string().min(1, "La date de diffusion est requise"),
   designer_id: z.string().uuid().optional().nullable(),
@@ -24,7 +30,7 @@ const CalendarItemCreateSchema = z.object({
 const CalendarItemUpdateSchema = z.object({
   title: z.string().min(3).max(150).optional(),
   description: z.string().optional().nullable(),
-  platform: z.enum(["INSTAGRAM", "FACEBOOK", "TIKTOK", "LINKEDIN", "TWITTER", "WEBSITE", "OTHER"]).optional(),
+  platform: z.enum(["INSTAGRAM", "FACEBOOK", "TIKTOK", "LINKEDIN", "TWITTER", "YOUTUBE", "WEBSITE", "OTHER"]).optional(),
   content_type: z.enum(["POST", "REEL", "STORY", "ARTICLE", "COMMUNIQUE", "VIDEO", "CAROUSEL"]).optional(),
   scheduled_date: z.string().optional(),
   published_url: z.string().url().optional().nullable().or(z.literal("")),
@@ -72,12 +78,12 @@ export async function createCalendarItemAction(rawInput: unknown): Promise<Actio
     const insertPayload: any = {
       title: data.title,
       description: data.description || null,
-      platform: data.platform,
+      platform: toDbPlatform(data.platform),
       content_type: data.content_type,
       scheduled_date: new Date(data.scheduled_date).toISOString(),
       designer_id: data.designer_id || null,
       writer_id: data.writer_id || null,
-      status: data.status,
+      status: toDbCalendarStatus(data.status),
       created_by: user.id,
       attachments: [],
     };
@@ -155,14 +161,14 @@ export async function updateCalendarItemAction(itemId: string, rawInput: unknown
 
     if (data.title !== undefined) updatePayload.title = data.title;
     if (data.description !== undefined) updatePayload.description = data.description;
-    if (data.platform !== undefined) updatePayload.platform = data.platform;
+    if (data.platform !== undefined) updatePayload.platform = toDbPlatform(data.platform);
     if (data.content_type !== undefined) updatePayload.content_type = data.content_type;
     if (data.scheduled_date !== undefined) updatePayload.scheduled_date = new Date(data.scheduled_date).toISOString();
     if (data.published_url !== undefined) updatePayload.published_url = data.published_url || null;
     if (data.designer_id !== undefined) updatePayload.designer_id = data.designer_id;
     if (data.writer_id !== undefined) updatePayload.writer_id = data.writer_id;
     if (data.status !== undefined) {
-      updatePayload.status = data.status;
+      updatePayload.status = toDbCalendarStatus(data.status);
       if (data.status === "PUBLISHED" && !updatePayload.published_date) {
         updatePayload.published_date = new Date().toISOString();
       }

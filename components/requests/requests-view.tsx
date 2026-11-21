@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatCard } from "@/components/ui/stat-card";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   Inbox,
   Plus,
@@ -337,13 +338,17 @@ export function RequestsView({ initialRequests, departments, userRole }: Request
 
       {/* Requests List */}
       {filteredRequests.length === 0 ? (
-        <Card className="text-center py-12">
-          <Inbox size={40} className="mx-auto text-slate-600 mb-3" />
-          <h3 className="text-sm font-semibold text-white">Aucune demande trouvée</h3>
-          <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-            Aucun ticket de demande de service ne correspond aux critères sélectionnés.
-          </p>
-        </Card>
+        <EmptyState
+          icon={Inbox}
+          title="Aucune demande trouvée"
+          description="Aucun ticket de demande de service ne correspond aux critères sélectionnés."
+          action={{
+            label: "Créer une Demande",
+            onClick: () => setIsCreateOpen(true),
+            icon: Plus,
+            variant: "outline",
+          }}
+        />
       ) : (
         <Card>
           <div className="divide-y divide-[#1F2937]">
@@ -457,11 +462,12 @@ export function RequestsView({ initialRequests, departments, userRole }: Request
 
       {/* New Request Modal */}
       {isCreateOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#111827] border border-[#27354F] rounded-2xl w-full max-w-lg shadow-2xl p-6 relative">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-[#0e0e12] border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl shadow-black/90 p-6 relative">
             <button
               onClick={() => setIsCreateOpen(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white"
+              className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors focus:outline-none focus:ring-2 focus:ring-uec-blue"
+              aria-label="Fermer"
             >
               <X size={20} />
             </button>

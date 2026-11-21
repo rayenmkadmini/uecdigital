@@ -35,11 +35,21 @@ body {
   background: #374151;
 }
 
-/* RTL Helpers */
+/* RTL Helpers & Arabic Typography */
 [dir="rtl"] {
   text-align: right;
+  direction: rtl;
+  font-family: var(--font-cairo), "Cairo", "Segoe UI", Tahoma, Arial, sans-serif;
+  letter-spacing: normal;
 }
 
 [dir="ltr"] {
   text-align: left;
+  direction: ltr;
+}
+
+/* WCAG 2.1 AA compliant keyboard focus indicators */
+*:focus-visible {
+  outline: 2px solid #2563EB;
+  outline-offset: 2px;
 }

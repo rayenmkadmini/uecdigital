@@ -8,6 +8,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   FolderKanban,
   Users,
@@ -20,7 +21,11 @@ import {
   FileText,
 } from "lucide-react";
 import type { CoordinatorDashboardData } from "@/lib/data/dashboard";
-import { submitCoordinatorReview } from "@/app/actions/approvals";
+import {
+  CoordinatorReviewModal,
+  CoordinatorReviewAction,
+  CoordinatorSubmissionItem,
+} from "@/components/dashboard/coordinator-review-modal";
 
 interface CoordinatorDashboardProps {
   data: CoordinatorDashboardData;
@@ -30,63 +35,26 @@ export function CoordinatorDashboard({ data }: CoordinatorDashboardProps) {
   const { t } = useTranslation();
   const [submissions, setSubmissions] = useState(data.teamSubmissions);
   const [notice, setNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
-  const [isProcessing, setIsProcessing] = useState<string | null>(null);
+  const [activeReviewModal, setActiveReviewModal] = useState<{
+    submission: CoordinatorSubmissionItem;
+    actionType: CoordinatorReviewAction;
+  } | null>(null);
 
-  const handleForwardToSuperAdmin = async (id: string, title: string) => {
-    setIsProcessing(id);
+  const handleOpenReview = (submission: CoordinatorSubmissionItem, actionType: CoordinatorReviewAction) => {
     setNotice(null);
-    try {
-      const notes = window.prompt(
-        "Notes de revue technique pour le Super Admin :",
-        "Conformité technique et graphique vérifiée. Prêt pour validation finale."
-      );
-      if (!notes) {
-        setIsProcessing(null);
-        return;
-      }
-
-      const res = await submitCoordinatorReview(id, "SUBMIT_TO_SUPER_ADMIN", notes);
-      if (res.success) {
-        setSubmissions((prev) => prev.filter((s) => s.id !== id));
-        setNotice({
-          type: "success",
-          message: `Livrable "${title}" validé par le coordinateur et transmis au Super Admin.`,
-        });
-      } else {
-        setNotice({ type: "error", message: res.message });
-      }
-    } catch (err: any) {
-      setNotice({ type: "error", message: err.message || "Erreur de transmission" });
-    } finally {
-      setIsProcessing(null);
-    }
+    setActiveReviewModal({ submission, actionType });
   };
 
-  const handleRequestRevision = async (id: string, title: string) => {
-    setIsProcessing(id);
-    setNotice(null);
-    try {
-      const notes = window.prompt("Instructions de retouche pour le membre :", "Retouches nécessaires sur les formats.");
-      if (!notes) {
-        setIsProcessing(null);
-        return;
-      }
-
-      const res = await submitCoordinatorReview(id, "REQUEST_REVISION", notes);
-      if (res.success) {
-        setSubmissions((prev) => prev.filter((s) => s.id !== id));
-        setNotice({
-          type: "success",
-          message: `Demande de retouche renvoyée au membre pour "${title}".`,
-        });
-      } else {
-        setNotice({ type: "error", message: res.message });
-      }
-    } catch (err: any) {
-      setNotice({ type: "error", message: err.message || "Erreur de demande de retouche" });
-    } finally {
-      setIsProcessing(null);
-    }
+  const handleReviewSuccess = (
+    submissionId: string,
+    actionType: CoordinatorReviewAction,
+    message: string
+  ) => {
+    setSubmissions((prev) => prev.filter((s) => s.id !== submissionId));
+    setNotice({
+      type: "success",
+      message,
+    });
   };
 
   return (
@@ -192,10 +160,12 @@ export function CoordinatorDashboard({ data }: CoordinatorDashboardProps) {
 
         <CardContent className="p-0">
           {submissions.length === 0 ? (
-            <div className="py-12 text-center text-slate-400">
-              <CheckCircle2 size={36} className="text-blue-400 mx-auto mb-2 opacity-80" />
-              <p className="text-sm font-medium">Aucun livrable en attente de revue d'équipe.</p>
-              <p className="text-xs text-slate-400 mt-1">Tous les livrables de votre pôle sont à jour.</p>
+            <div className="p-6">
+              <EmptyState
+                icon={CheckCircle2}
+                title="Aucun livrable en attente de revue d'équipe"
+                description="Tous les livrables de votre pôle ont été traités ou sont en cours de finalisation."
+              />
             </div>
           ) : (
             <div className="divide-y divide-[#1F2937]">
@@ -225,8 +195,7 @@ export function CoordinatorDashboard({ data }: CoordinatorDashboardProps) {
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={isProcessing === sub.id}
-                      onClick={() => handleRequestRevision(sub.id, sub.taskTitle)}
+                      onClick={() => handleOpenReview(sub, "REQUEST_REVISION")}
                       className="text-amber-300 hover:text-amber-200 border-amber-800/60 text-xs"
                     >
                       <RotateCcw size={14} className="mr-1" />
@@ -235,12 +204,11 @@ export function CoordinatorDashboard({ data }: CoordinatorDashboardProps) {
                     <Button
                       variant="primary"
                       size="sm"
-                      disabled={isProcessing === sub.id}
-                      onClick={() => handleForwardToSuperAdmin(sub.id, sub.taskTitle)}
+                      onClick={() => handleOpenReview(sub, "SUBMIT_TO_SUPER_ADMIN")}
                       className="bg-uec-blue hover:bg-uec-blueHover text-xs"
                     >
                       <Send size={14} className="mr-1" />
-                      {isProcessing === sub.id ? "Envoi..." : "Transmettre au Super Admin"}
+                      Transmettre au Super Admin
                     </Button>
                   </div>
                 </div>
@@ -315,6 +283,17 @@ export function CoordinatorDashboard({ data }: CoordinatorDashboardProps) {
           </CardContent>
         </Card>
       </div>
+
+      {/* Coordinator Review Modal */}
+      {activeReviewModal && (
+        <CoordinatorReviewModal
+          isOpen={true}
+          onClose={() => setActiveReviewModal(null)}
+          submission={activeReviewModal.submission}
+          actionType={activeReviewModal.actionType}
+          onSuccess={handleReviewSuccess}
+        />
+      )}
     </div>
   );
 }

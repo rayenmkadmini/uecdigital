@@ -19,6 +19,74 @@ export type RequestStatus =
   | "REJECTED"
   | "CONVERTED_TO_TASK";
 
+export function toDbRequestCategory(cat: string): string {
+  switch (cat) {
+    case "DESIGN":
+      return "DESIGN_REQUEST";
+    case "VIDEO":
+      return "VIDEO_REQUEST";
+    case "PHOTO":
+      return "PHOTOGRAPHY_REQUEST";
+    case "WEB":
+      return "DEVELOPMENT_REQUEST";
+    case "LOGISTICS":
+      return "TECHNICAL_SUPPORT";
+    case "COMMUNICATION":
+      return "DIGITAL_STRATEGY";
+    case "GENERAL":
+      return "OTHER";
+    default:
+      return cat;
+  }
+}
+
+export function fromDbRequestCategory(cat: string): RequestCategory {
+  switch (cat) {
+    case "DESIGN_REQUEST":
+      return "DESIGN";
+    case "VIDEO_REQUEST":
+      return "VIDEO";
+    case "PHOTOGRAPHY_REQUEST":
+      return "PHOTO";
+    case "DEVELOPMENT_REQUEST":
+      return "WEB";
+    case "TECHNICAL_SUPPORT":
+      return "LOGISTICS";
+    case "DIGITAL_STRATEGY":
+      return "COMMUNICATION";
+    case "OTHER":
+      return "GENERAL";
+    default:
+      return (cat as RequestCategory) || "GENERAL";
+  }
+}
+
+export function toDbRequestStatus(st: string): string {
+  switch (st) {
+    case "CONVERTED_TO_TASK":
+      return "ASSIGNED";
+    case "PENDING_REVIEW":
+      return "UNDER_REVIEW";
+    case "CANCELLED":
+      return "CLOSED";
+    default:
+      return st;
+  }
+}
+
+export function fromDbRequestStatus(st: string): RequestStatus {
+  switch (st) {
+    case "ASSIGNED":
+      return "CONVERTED_TO_TASK";
+    case "UNDER_REVIEW":
+      return "ACCEPTED";
+    case "CLOSED":
+      return "COMPLETED";
+    default:
+      return (st as RequestStatus) || "NEW";
+  }
+}
+
 export interface ServiceRequestListItem {
   id: string;
   code: string;
@@ -78,11 +146,11 @@ export async function getServiceRequests(filter?: RequestFilter): Promise<Servic
     .order("created_at", { ascending: false });
 
   if (filter?.status && filter.status !== "ALL") {
-    query = query.eq("status", filter.status);
+    query = query.eq("status", toDbRequestStatus(filter.status));
   }
 
   if (filter?.category && filter.category !== "ALL") {
-    query = query.eq("category", filter.category);
+    query = query.eq("category", toDbRequestCategory(filter.category));
   }
 
   if (filter?.priority && filter.priority !== "ALL") {
@@ -143,7 +211,7 @@ export async function getServiceRequests(filter?: RequestFilter): Promise<Servic
       code: item.code,
       title: item.title,
       description: item.description,
-      category: item.category as RequestCategory,
+      category: fromDbRequestCategory(item.category),
       requesting_department_id: item.requesting_department_id,
       requesting_department_name: reqDept?.name || null,
       target_department_id: item.target_department_id,
@@ -154,7 +222,7 @@ export async function getServiceRequests(filter?: RequestFilter): Promise<Servic
       priority: item.priority as RequestPriority,
       desired_deadline: item.desired_deadline,
       attachments: Array.isArray(item.attachments) ? item.attachments : [],
-      status: item.status as RequestStatus,
+      status: fromDbRequestStatus(item.status),
       assigned_coordinator_id: item.assigned_coordinator_id,
       assigned_coordinator_name: item.assigned_coordinator_id
         ? userMap.get(item.assigned_coordinator_id) || null

@@ -4,11 +4,31 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile, AuthorizationError } from "@/lib/auth/rbac";
-import type { EquipmentCategory, EquipmentCondition, EquipmentStatus, LoanStatus } from "@/lib/data/equipment";
+import {
+  type EquipmentCategory,
+  type EquipmentCondition,
+  type EquipmentStatus,
+  type LoanStatus,
+  toDbEquipmentCategory,
+  toDbEquipmentCondition,
+  toDbEquipmentStatus,
+} from "@/lib/data/equipment";
 
-const EquipmentIdSchema = z.string().uuid("ID de matériel invalide");
-const LoanIdSchema = z.string().uuid("ID d'emprunt invalide");
-const EquipmentConditionSchema = z.enum(["NEW", "EXCELLENT", "GOOD", "FAIR", "DAMAGED", "MAINTENANCE"]);
+const UuidSchema = z.string().uuid("ID invalide");
+
+const EquipmentCategoryEnum = z.enum([
+  "PHOTO_VIDEO",
+  "AUDIO",
+  "INFORMATIQUE",
+  "ACCESSOIRES",
+  "SONO",
+  "LOGISTIQUE",
+  "AUTRE",
+]);
+
+const EquipmentConditionEnum = z.enum(["NEW", "EXCELLENT", "GOOD", "FAIR", "DAMAGED", "MAINTENANCE"]);
+
+const EquipmentStatusEnum = z.enum(["AVAILABLE", "LOANED", "MAINTENANCE", "RETIRED"]);
 
 const EquipmentCreateSchema = z.object({
   code: z
@@ -17,12 +37,29 @@ const EquipmentCreateSchema = z.object({
     .max(20)
     .regex(/^[A-Z0-9_-]+$/, "Le code doit être en majuscules sans espaces (ex: MAT-CAM-01)"),
   name: z.string().min(3, "Le nom du matériel doit comporter au moins 3 caractères").max(150),
-  category: z.enum(["PHOTO_VIDEO", "AUDIO", "INFORMATIQUE", "ACCESSOIRES", "SONO", "LOGISTIQUE", "AUTRE"]),
+  category: EquipmentCategoryEnum,
   description: z.string().optional().nullable(),
   serial_number: z.string().optional().nullable(),
-  condition: EquipmentConditionSchema.default("GOOD"),
+  condition: EquipmentConditionEnum.default("GOOD"),
   storage_location: z.string().optional().nullable(),
   purchase_date: z.string().optional().nullable(),
+});
+
+const EquipmentUpdateSchema = z.object({
+  name: z.string().min(3).max(150).optional(),
+  category: EquipmentCategoryEnum.optional(),
+  description: z.string().optional().nullable(),
+  serial_number: z.string().optional().nullable(),
+  condition: EquipmentConditionEnum.optional(),
+  status: EquipmentStatusEnum.optional(),
+  storage_location: z.string().optional().nullable(),
+  purchase_date: z.string().optional().nullable(),
+});
+
+const LoanRequestSchema = z.object({
+  equipmentId: z.string().uuid("ID de matériel invalide"),
+  expectedReturnDate: z.string().min(1, "La date de retour prévue est requise"),
+  notes: z.string().optional().nullable(),
 });
 
 export interface ActionResponse<T = any> {
@@ -51,14 +88,24 @@ export async function createEquipmentAction(rawInput: unknown): Promise<ActionRe
     const data = parseResult.data;
     const supabase = await createClient();
 
+    // Check code uniqueness
+    const { data: existing } = await (supabase.from("equipment") as any)
+      .select("id")
+      .eq("code", data.code.toUpperCase())
+      .maybeSingle();
+
+    if (existing) {
+      return { success: false, message: `Un équipement avec le code "${data.code.toUpperCase()}" existe déjà.` };
+    }
+
     const { data: inserted, error } = await (supabase.from("equipment") as any)
       .insert({
-        code: data.code,
+        code: data.code.toUpperCase(),
         name: data.name,
-        category: data.category,
+        category: toDbEquipmentCategory(data.category),
         description: data.description || null,
         serial_number: data.serial_number || null,
-        condition: data.condition,
+        condition: toDbEquipmentCondition(data.condition),
         status: "AVAILABLE",
         storage_location: data.storage_location || null,
         purchase_date: data.purchase_date || null,
@@ -66,9 +113,9 @@ export async function createEquipmentAction(rawInput: unknown): Promise<ActionRe
       .select("id, code, name")
       .single();
 
-    if (error) {
+    if (error || !inserted) {
       console.error("Supabase insert equipment error:", error);
-      return { success: false, message: `Erreur: ${error.message}` };
+      return { success: false, message: `Erreur: ${error?.message}` };
     }
 
     // Audit log
@@ -81,6 +128,8 @@ export async function createEquipmentAction(rawInput: unknown): Promise<ActionRe
     });
 
     revalidatePath("/dashboard/equipment");
+    revalidatePath("/dashboard");
+
     return {
       success: true,
       message: `Équipement [${inserted.code}] enregistré au catalogue`,
@@ -94,28 +143,162 @@ export async function createEquipmentAction(rawInput: unknown): Promise<ActionRe
   }
 }
 
+export async function updateEquipmentAction(equipmentId: string, rawInput: unknown): Promise<ActionResponse> {
+  try {
+    const validId = UuidSchema.safeParse(equipmentId);
+    if (!validId.success) {
+      return { success: false, message: "ID de matériel invalide" };
+    }
+
+    const { user, profile } = await requireProfile();
+    if (profile.role !== "SUPER_ADMIN") {
+      return { success: false, message: "Action réservée aux Super Administrateurs" };
+    }
+
+    const parseResult = EquipmentUpdateSchema.safeParse(rawInput);
+    if (!parseResult.success) {
+      return {
+        success: false,
+        message: "Données de modification invalides",
+        errors: parseResult.error.flatten().fieldErrors,
+      };
+    }
+
+    const data = parseResult.data;
+    const supabase = await createClient();
+
+    const updatePayload: Record<string, any> = {
+      updated_at: new Date().toISOString(),
+    };
+    if (data.name !== undefined) updatePayload.name = data.name;
+    if (data.category !== undefined) updatePayload.category = toDbEquipmentCategory(data.category);
+    if (data.description !== undefined) updatePayload.description = data.description;
+    if (data.serial_number !== undefined) updatePayload.serial_number = data.serial_number;
+    if (data.condition !== undefined) updatePayload.condition = toDbEquipmentCondition(data.condition);
+    if (data.status !== undefined) updatePayload.status = toDbEquipmentStatus(data.status);
+    if (data.storage_location !== undefined) updatePayload.storage_location = data.storage_location;
+    if (data.purchase_date !== undefined) updatePayload.purchase_date = data.purchase_date;
+
+    const { data: updated, error } = await (supabase.from("equipment") as any)
+      .update(updatePayload)
+      .eq("id", validId.data)
+      .select("id, code, name")
+      .single();
+
+    if (error || !updated) {
+      return { success: false, message: `Erreur: ${error?.message}` };
+    }
+
+    // Audit log
+    await (supabase.from("activity_logs") as any).insert({
+      actor_id: user.id,
+      action: "UPDATE_EQUIPMENT",
+      entity_type: "equipment",
+      entity_id: validId.data,
+      details: { code: updated.code, name: updated.name, changes: updatePayload },
+    });
+
+    revalidatePath("/dashboard/equipment");
+    revalidatePath("/dashboard");
+
+    return {
+      success: true,
+      message: `Équipement [${updated.code}] mis à jour avec succès`,
+      data: updated,
+    };
+  } catch (err: any) {
+    return { success: false, message: err.message || "Erreur interne" };
+  }
+}
+
+export async function deleteEquipmentAction(equipmentId: string): Promise<ActionResponse> {
+  try {
+    const validId = UuidSchema.safeParse(equipmentId);
+    if (!validId.success) {
+      return { success: false, message: "ID de matériel invalide" };
+    }
+
+    const { user, profile } = await requireProfile();
+    if (profile.role !== "SUPER_ADMIN") {
+      return { success: false, message: "Action réservée aux Super Administrateurs" };
+    }
+
+    const supabase = await createClient();
+
+    // Check if equipment has active loans
+    const { data: activeLoans } = await (supabase.from("equipment_loans") as any)
+      .select("id")
+      .eq("equipment_id", validId.data)
+      .in("status", ["ACTIVE", "REQUESTED"])
+      .limit(1);
+
+    if (activeLoans && activeLoans.length > 0) {
+      return {
+        success: false,
+        message: "Impossible de supprimer un équipement ayant des prêts actifs ou en attente.",
+      };
+    }
+
+    const { data: eq, error: fetchErr } = await (supabase.from("equipment") as any)
+      .select("id, code, name")
+      .eq("id", validId.data)
+      .single();
+
+    if (fetchErr || !eq) {
+      return { success: false, message: "Matériel introuvable" };
+    }
+
+    const { error: delErr } = await (supabase.from("equipment") as any)
+      .delete()
+      .eq("id", validId.data);
+
+    if (delErr) {
+      return { success: false, message: `Erreur: ${delErr.message}` };
+    }
+
+    // Audit log
+    await (supabase.from("activity_logs") as any).insert({
+      actor_id: user.id,
+      action: "DELETE_EQUIPMENT",
+      entity_type: "equipment",
+      entity_id: validId.data,
+      details: { code: eq.code, name: eq.name },
+    });
+
+    revalidatePath("/dashboard/equipment");
+    revalidatePath("/dashboard");
+
+    return {
+      success: true,
+      message: `Équipement [${eq.code}] retiré du catalogue.`,
+    };
+  } catch (err: any) {
+    return { success: false, message: err.message || "Erreur interne" };
+  }
+}
+
 export async function requestEquipmentLoanAction(
   equipmentId: string,
   expectedReturnDate: string,
   notes?: string
 ): Promise<ActionResponse> {
   try {
-    const validEqId = EquipmentIdSchema.safeParse(equipmentId);
-    if (!validEqId.success) {
-      return { success: false, message: "ID d'équipement invalide" };
+    const parseResult = LoanRequestSchema.safeParse({ equipmentId, expectedReturnDate, notes });
+    if (!parseResult.success) {
+      return {
+        success: false,
+        message: "Données de demande d'emprunt invalides",
+        errors: parseResult.error.flatten().fieldErrors,
+      };
     }
 
-    if (!expectedReturnDate || isNaN(Date.parse(expectedReturnDate))) {
-      return { success: false, message: "Date de retour prévisionnelle invalide" };
-    }
-
-    const { user } = await requireProfile();
+    const { user, profile } = await requireProfile();
     const supabase = await createClient();
 
     // Verify equipment is available
     const { data: eq, error: eqErr } = await (supabase.from("equipment") as any)
-      .select("id, name, status, condition")
-      .eq("id", validEqId.data)
+      .select("id, name, code, status, condition")
+      .eq("id", equipmentId)
       .single();
 
     if (eqErr || !eq) {
@@ -128,7 +311,7 @@ export async function requestEquipmentLoanAction(
 
     const { data: loan, error: loanErr } = await (supabase.from("equipment_loans") as any)
       .insert({
-        equipment_id: validEqId.data,
+        equipment_id: equipmentId,
         borrower_id: user.id,
         expected_return_date: new Date(expectedReturnDate).toISOString(),
         condition_at_checkout: eq.condition,
@@ -148,10 +331,12 @@ export async function requestEquipmentLoanAction(
       action: "REQUEST_EQUIPMENT_LOAN",
       entity_type: "equipment_loans",
       entity_id: loan.id,
-      details: { equipmentName: eq.name, expectedReturnDate },
+      details: { equipmentCode: eq.code, equipmentName: eq.name, expectedReturnDate },
     });
 
     revalidatePath("/dashboard/equipment");
+    revalidatePath("/dashboard");
+
     return {
       success: true,
       message: "Demande d'emprunt enregistrée avec succès",
@@ -166,8 +351,8 @@ export async function requestEquipmentLoanAction(
 
 export async function approveEquipmentLoanAction(loanId: string): Promise<ActionResponse> {
   try {
-    const validLoanId = LoanIdSchema.safeParse(loanId);
-    if (!validLoanId.success) {
+    const validId = UuidSchema.safeParse(loanId);
+    if (!validId.success) {
       return { success: false, message: "ID d'emprunt invalide" };
     }
 
@@ -180,8 +365,8 @@ export async function approveEquipmentLoanAction(loanId: string): Promise<Action
 
     // Fetch loan
     const { data: loan, error: loanErr } = await (supabase.from("equipment_loans") as any)
-      .select("id, equipment_id, status")
-      .eq("id", validLoanId.data)
+      .select("id, equipment_id, borrower_id, status, equipment:equipment_id(name, code)")
+      .eq("id", validId.data)
       .single();
 
     if (loanErr || !loan) {
@@ -196,12 +381,12 @@ export async function approveEquipmentLoanAction(loanId: string): Promise<Action
         borrow_date: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .eq("id", validLoanId.data);
+      .eq("id", validId.data);
 
     // Update equipment status
     await (supabase.from("equipment") as any)
       .update({
-        status: "LOANED",
+        status: "BORROWED",
         updated_at: new Date().toISOString(),
       })
       .eq("id", loan.equipment_id);
@@ -211,11 +396,25 @@ export async function approveEquipmentLoanAction(loanId: string): Promise<Action
       actor_id: user.id,
       action: "APPROVE_EQUIPMENT_LOAN",
       entity_type: "equipment_loans",
-      entity_id: validLoanId.data,
-      details: { equipmentId: loan.equipment_id },
+      entity_id: validId.data,
+      details: { equipmentId: loan.equipment_id, borrowerId: loan.borrower_id },
     });
 
+    // Notify borrower
+    if (loan.borrower_id) {
+      const eqName = loan.equipment?.name || "Matériel";
+      await (supabase.from("notifications") as any).insert({
+        user_id: loan.borrower_id,
+        title: "Emprunt de matériel validé",
+        message: `Votre demande d'emprunt pour "${eqName}" a été validée par la direction.`,
+        type: "EQUIPMENT",
+        link: `/dashboard/equipment`,
+      });
+    }
+
     revalidatePath("/dashboard/equipment");
+    revalidatePath("/dashboard");
+
     return {
       success: true,
       message: "Sortie de matériel autorisée",
@@ -228,20 +427,84 @@ export async function approveEquipmentLoanAction(loanId: string): Promise<Action
   }
 }
 
+export async function rejectEquipmentLoanAction(loanId: string, reason?: string): Promise<ActionResponse> {
+  try {
+    const validId = UuidSchema.safeParse(loanId);
+    if (!validId.success) {
+      return { success: false, message: "ID d'emprunt invalide" };
+    }
+
+    const { user, profile } = await requireProfile();
+    if (profile.role !== "SUPER_ADMIN") {
+      return { success: false, message: "Seul un Super Admin peut refuser une demande d'emprunt" };
+    }
+
+    const supabase = await createClient();
+
+    const { data: loan, error: loanErr } = await (supabase.from("equipment_loans") as any)
+      .select("id, equipment_id, borrower_id, status, equipment:equipment_id(name, code)")
+      .eq("id", validId.data)
+      .single();
+
+    if (loanErr || !loan) {
+      return { success: false, message: "Emprunt introuvable" };
+    }
+
+    await (supabase.from("equipment_loans") as any)
+      .update({
+        status: "REJECTED",
+        notes: reason ? `Refusé : ${reason}` : "Demande refusée par la direction",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", validId.data);
+
+    // Audit log
+    await (supabase.from("activity_logs") as any).insert({
+      actor_id: user.id,
+      action: "REJECT_EQUIPMENT_LOAN",
+      entity_type: "equipment_loans",
+      entity_id: validId.data,
+      details: { equipmentId: loan.equipment_id, reason: reason || null },
+    });
+
+    // Notify borrower
+    if (loan.borrower_id) {
+      const eqName = loan.equipment?.name || "Matériel";
+      await (supabase.from("notifications") as any).insert({
+        user_id: loan.borrower_id,
+        title: "Demande d'emprunt non accordée",
+        message: `Votre demande pour "${eqName}" a été refusée${reason ? ` : ${reason}` : ""}.`,
+        type: "EQUIPMENT",
+        link: `/dashboard/equipment`,
+      });
+    }
+
+    revalidatePath("/dashboard/equipment");
+    revalidatePath("/dashboard");
+
+    return {
+      success: true,
+      message: "Demande d'emprunt refusée.",
+    };
+  } catch (err: any) {
+    return { success: false, message: err.message || "Erreur interne" };
+  }
+}
+
 export async function returnEquipmentAction(
   loanId: string,
   conditionAtReturn: EquipmentCondition,
   notes?: string
 ): Promise<ActionResponse> {
   try {
-    const validLoanId = LoanIdSchema.safeParse(loanId);
-    if (!validLoanId.success) {
+    const validId = UuidSchema.safeParse(loanId);
+    if (!validId.success) {
       return { success: false, message: "ID d'emprunt invalide" };
     }
 
-    const validCond = EquipmentConditionSchema.safeParse(conditionAtReturn);
-    if (!validCond.success) {
-      return { success: false, message: "État du matériel au retour non reconnu" };
+    const validCondition = EquipmentConditionEnum.safeParse(conditionAtReturn);
+    if (!validCondition.success) {
+      return { success: false, message: "État de retour invalide" };
     }
 
     const { user, profile } = await requireProfile();
@@ -252,8 +515,8 @@ export async function returnEquipmentAction(
     const supabase = await createClient();
 
     const { data: loan, error: loanErr } = await (supabase.from("equipment_loans") as any)
-      .select("id, equipment_id")
-      .eq("id", validLoanId.data)
+      .select("id, equipment_id, borrower_id")
+      .eq("id", validId.data)
       .single();
 
     if (loanErr || !loan) {
@@ -265,21 +528,21 @@ export async function returnEquipmentAction(
       .update({
         status: "RETURNED",
         actual_return_date: new Date().toISOString(),
-        condition_at_return: validCond.data,
+        condition_at_return: validCondition.data,
         notes: notes || null,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", validLoanId.data);
+      .eq("id", validId.data);
 
     // Update equipment
-    const newStatus: EquipmentStatus = validCond.data === "DAMAGED" || validCond.data === "MAINTENANCE"
+    const newStatus: EquipmentStatus = validCondition.data === "DAMAGED" || validCondition.data === "MAINTENANCE"
       ? "MAINTENANCE"
       : "AVAILABLE";
 
     await (supabase.from("equipment") as any)
       .update({
         status: newStatus,
-        condition: validCond.data,
+        condition: toDbEquipmentCondition(validCondition.data),
         updated_at: new Date().toISOString(),
       })
       .eq("id", loan.equipment_id);
@@ -289,11 +552,13 @@ export async function returnEquipmentAction(
       actor_id: user.id,
       action: "RETURN_EQUIPMENT",
       entity_type: "equipment_loans",
-      entity_id: validLoanId.data,
-      details: { conditionAtReturn: validCond.data, equipmentId: loan.equipment_id },
+      entity_id: validId.data,
+      details: { conditionAtReturn: validCondition.data, equipmentId: loan.equipment_id },
     });
 
     revalidatePath("/dashboard/equipment");
+    revalidatePath("/dashboard");
+
     return {
       success: true,
       message: "Retour de matériel enregistré et stock actualisé",

@@ -9,6 +9,50 @@ export type MediaCategory =
   | "AUDIO"
   | "AUTRE";
 
+export function toDbMediaCategory(cat: string): string {
+  switch (cat) {
+    case "BRANDING":
+      return "BRAND_ASSETS";
+    case "PHOTO":
+      return "PHOTOGRAPHY";
+    case "VIDEO":
+      return "VIDEOS";
+    case "DOCUMENT":
+      return "DOCUMENTS";
+    case "DESIGN_ASSET":
+      return "GRAPHIC_DESIGNS";
+    case "AUDIO":
+      return "SOURCE_FILES";
+    case "AUTRE":
+      return "PROJECT_ARCHIVES";
+    default:
+      return cat;
+  }
+}
+
+export function fromDbMediaCategory(cat: string): MediaCategory {
+  switch (cat) {
+    case "BRAND_ASSETS":
+    case "LOGOS":
+      return "BRANDING";
+    case "PHOTOGRAPHY":
+      return "PHOTO";
+    case "VIDEOS":
+      return "VIDEO";
+    case "DOCUMENTS":
+    case "TEMPLATES":
+      return "DOCUMENT";
+    case "GRAPHIC_DESIGNS":
+      return "DESIGN_ASSET";
+    case "SOURCE_FILES":
+      return "AUDIO";
+    case "PROJECT_ARCHIVES":
+      return "AUTRE";
+    default:
+      return (cat as MediaCategory) || "AUTRE";
+  }
+}
+
 export interface MediaFileItem {
   id: string;
   title: string;
@@ -201,7 +245,7 @@ export async function getMediaFiles(filter?: MediaFilter): Promise<MediaFileItem
     .order("created_at", { ascending: false });
 
   if (filter?.category && filter.category !== "ALL") {
-    query = query.eq("category", filter.category);
+    query = query.eq("category", toDbMediaCategory(filter.category));
   }
 
   if (filter?.departmentId && filter.departmentId !== "ALL") {
@@ -263,7 +307,7 @@ export async function getMediaFiles(filter?: MediaFilter): Promise<MediaFileItem
         file_size: Number(f.file_size || 0),
         file_size_formatted: formatBytes(Number(f.file_size || 0)),
         mime_type: f.mime_type,
-        category: f.category as MediaCategory,
+        category: fromDbMediaCategory(f.category),
         department_id: f.department_id,
         department_name: f.department_id ? deptMap.get(f.department_id) || null : null,
         project_id: f.project_id,

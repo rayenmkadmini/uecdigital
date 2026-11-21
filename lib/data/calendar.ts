@@ -6,6 +6,7 @@ export type ContentPlatform =
   | "TIKTOK"
   | "LINKEDIN"
   | "TWITTER"
+  | "YOUTUBE"
   | "WEBSITE"
   | "OTHER";
 
@@ -27,6 +28,37 @@ export type CalendarWorkflowStatus =
   | "SCHEDULED"
   | "PUBLISHED"
   | "CANCELLED";
+
+export function toDbCalendarStatus(status: string): string {
+  switch (status) {
+    case "IN_DESIGN":
+      return "DESIGN";
+    case "IN_REVIEW":
+      return "REVIEW";
+    case "APPROVED":
+      return "SUPER_ADMIN_APPROVAL";
+    default:
+      return status;
+  }
+}
+
+export function fromDbCalendarStatus(status: string): CalendarWorkflowStatus {
+  switch (status) {
+    case "DESIGN":
+      return "IN_DESIGN";
+    case "REVIEW":
+      return "IN_REVIEW";
+    case "SUPER_ADMIN_APPROVAL":
+      return "APPROVED";
+    default:
+      return (status as CalendarWorkflowStatus) || "IDEA";
+  }
+}
+
+export function toDbPlatform(platform: string): string {
+  if (platform === "TWITTER") return "OTHER";
+  return platform;
+}
 
 export interface CalendarItem {
   id: string;
@@ -89,7 +121,7 @@ export async function getCalendarItems(filter?: CalendarFilter): Promise<Calenda
   }
 
   if (filter?.status && filter.status !== "ALL") {
-    query = query.eq("status", filter.status);
+    query = query.eq("status", toDbCalendarStatus(filter.status));
   }
 
   if (filter?.contentType && filter.contentType !== "ALL") {
@@ -139,7 +171,7 @@ export async function getCalendarItems(filter?: CalendarFilter): Promise<Calenda
     designer_name: item.designer_id ? profileMap.get(item.designer_id) || null : null,
     writer_id: item.writer_id,
     writer_name: item.writer_id ? profileMap.get(item.writer_id) || null : null,
-    status: item.status as CalendarWorkflowStatus,
+    status: fromDbCalendarStatus(item.status),
     attachments: Array.isArray(item.attachments) ? item.attachments : [],
     approved_by: item.approved_by,
     approver_name: item.approved_by ? profileMap.get(item.approved_by) || null : null,

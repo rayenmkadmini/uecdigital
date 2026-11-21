@@ -8,6 +8,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   CheckSquare,
   Clock,
@@ -210,10 +211,12 @@ export function MemberDashboard({ data, userName, departmentName }: MemberDashbo
 
         <CardContent className="p-0">
           {tasks.length === 0 ? (
-            <div className="py-12 text-center text-slate-400">
-              <CheckCircle2 size={36} className="text-emerald-500 mx-auto mb-2 opacity-80" />
-              <p className="text-sm font-medium">Aucune tâche active assignée actuellement.</p>
-              <p className="text-xs text-slate-400 mt-1">Consultez le module Tâches pour explorer les opportunités de contribution.</p>
+            <div className="p-6">
+              <EmptyState
+                icon={CheckCircle2}
+                title="Aucune tâche active assignée actuellement"
+                description="Consultez le module Tâches pour explorer les opportunités de contribution."
+              />
             </div>
           ) : (
             <div className="divide-y divide-[#1F2937]">
@@ -276,16 +279,17 @@ export function MemberDashboard({ data, userName, departmentName }: MemberDashbo
 
       {/* Submission Modal */}
       {selectedTask && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-          <div className="bg-[#111827] border border-[#27354F] rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-5">
-            <div className="flex items-center justify-between border-b border-[#1F2937] pb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-150">
+          <div className="bg-[#0e0e12] border border-white/10 rounded-2xl p-6 w-full max-w-lg shadow-2xl shadow-black/90 space-y-5">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
               <div>
                 <h3 className="text-base font-bold text-white">Soumettre un Livrable</h3>
                 <p className="text-xs text-slate-400">{selectedTask.title}</p>
               </div>
               <button
                 onClick={() => setSelectedTask(null)}
-                className="text-slate-400 hover:text-white"
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
+                aria-label="Fermer"
               >
                 ✕
               </button>

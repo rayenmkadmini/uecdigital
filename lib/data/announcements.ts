@@ -9,7 +9,7 @@ export interface AnnouncementItem {
   target_audience: string;
   department_id: string | null;
   department_name: string | null;
-  priority: "LOW" | "NORMAL" | "HIGH" | "CRITICAL";
+  priority: "LOW" | "NORMAL" | "HIGH" | "CRITICAL" | "IMPORTANT" | "URGENT";
   is_pinned: boolean;
   published_at: string;
   expires_at: string | null;
@@ -75,7 +75,7 @@ export async function getAnnouncements(): Promise<AnnouncementItem[]> {
     target_audience: a.target_audience,
     department_id: a.department_id,
     department_name: a.department_id ? deptMap.get(a.department_id) || null : null,
-    priority: a.priority,
+    priority: (a.priority === "URGENT" ? "CRITICAL" : a.priority === "IMPORTANT" ? "HIGH" : a.priority) as AnnouncementItem["priority"],
     is_pinned: a.is_pinned,
     published_at: a.published_at,
     expires_at: a.expires_at,

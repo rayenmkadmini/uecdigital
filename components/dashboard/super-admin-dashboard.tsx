@@ -7,20 +7,25 @@ import { StatCard } from "@/components/ui/stat-card";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   FolderKanban,
   ShieldCheck,
   Users,
-  HardDrive,
   CheckCircle2,
   AlertCircle,
   Building2,
   Clock,
   ArrowUpRight,
   RotateCcw,
+  XCircle,
 } from "lucide-react";
 import type { SuperAdminDashboardData } from "@/lib/data/dashboard";
-import { executeFinalApproval } from "@/app/actions/approvals";
+import {
+  ApprovalDecisionModal,
+  ApprovalDecisionType,
+  ApprovalSubmissionItem,
+} from "@/components/dashboard/approval-decision-modal";
 
 interface SuperAdminDashboardProps {
   data: SuperAdminDashboardData;
@@ -30,50 +35,26 @@ export function SuperAdminDashboard({ data }: SuperAdminDashboardProps) {
   const { t } = useTranslation();
   const [approvals, setApprovals] = useState(data.pendingApprovals);
   const [actionNotice, setActionNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
-  const [isProcessing, setIsProcessing] = useState<string | null>(null);
+  const [activeModal, setActiveModal] = useState<{
+    submission: ApprovalSubmissionItem;
+    decisionType: ApprovalDecisionType;
+  } | null>(null);
 
-  const handleApprove = async (id: string, title: string) => {
-    setIsProcessing(id);
+  const handleOpenDecision = (item: ApprovalSubmissionItem, decisionType: ApprovalDecisionType) => {
     setActionNotice(null);
-    try {
-      const res = await executeFinalApproval(id, "Validé définitivement par le Super Administrateur.");
-      if (res.success) {
-        setApprovals((prev) => prev.filter((a) => a.id !== id));
-        setActionNotice({
-          type: "success",
-          message: `Livrable "${title}" validé définitivement par le Super Admin.`,
-        });
-      } else {
-        setActionNotice({ type: "error", message: res.message });
-      }
-    } catch (err: any) {
-      setActionNotice({ type: "error", message: err.message || "Erreur de validation" });
-    } finally {
-      setIsProcessing(null);
-    }
+    setActiveModal({ submission: item, decisionType });
   };
 
-  const handleRevision = async (id: string, title: string) => {
-    setIsProcessing(id);
-    setActionNotice(null);
-    try {
-      // Prompt for revision reason
-      const reason = window.prompt("Motif de la demande de révision :", "Modifications requises sur la version actuelle.");
-      if (!reason) {
-        setIsProcessing(null);
-        return;
-      }
-
-      setApprovals((prev) => prev.filter((a) => a.id !== id));
-      setActionNotice({
-        type: "success",
-        message: `Demande de révision envoyée à l'équipe pour "${title}".`,
-      });
-    } catch (err: any) {
-      setActionNotice({ type: "error", message: err.message || "Erreur" });
-    } finally {
-      setIsProcessing(null);
-    }
+  const handleDecisionSuccess = (
+    submissionId: string,
+    decisionType: ApprovalDecisionType,
+    message: string
+  ) => {
+    setApprovals((prev) => prev.filter((a) => a.id !== submissionId));
+    setActionNotice({
+      type: "success",
+      message,
+    });
   };
 
   return (
@@ -194,10 +175,12 @@ export function SuperAdminDashboard({ data }: SuperAdminDashboardProps) {
 
         <CardContent className="p-0">
           {approvals.length === 0 ? (
-            <div className="py-12 text-center text-slate-400">
-              <CheckCircle2 size={36} className="text-emerald-500 mx-auto mb-2 opacity-80" />
-              <p className="text-sm font-medium">{t("dashboard.noPendingApprovals")}</p>
-              <p className="text-xs text-slate-400 mt-1">Tous les livrables soumis ont été examinés.</p>
+            <div className="p-6">
+              <EmptyState
+                icon={CheckCircle2}
+                title={t("dashboard.noPendingApprovals")}
+                description="Tous les livrables soumis ont été examinés avec succès selon les critères UEC."
+              />
             </div>
           ) : (
             <div className="divide-y divide-[#1F2937]">
@@ -237,10 +220,20 @@ export function SuperAdminDashboard({ data }: SuperAdminDashboardProps) {
                   {/* Super Admin Action Controls */}
                   <div className="flex items-center gap-2 self-end md:self-center">
                     <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={() => handleOpenDecision(item, "REJECTED")}
+                      className="bg-rose-700 hover:bg-rose-800 text-xs"
+                      title="Rejet officiel"
+                    >
+                      <XCircle size={14} className="mr-1" />
+                      Rejeter
+                    </Button>
+
+                    <Button
                       variant="outline"
                       size="sm"
-                      disabled={isProcessing === item.id}
-                      onClick={() => handleRevision(item.id, item.taskTitle)}
+                      onClick={() => handleOpenDecision(item, "REVISION")}
                       className="text-amber-300 hover:text-amber-200 border-amber-900/60 hover:bg-amber-950/40 text-xs"
                       title="Renvoyer pour modifications"
                     >
@@ -251,13 +244,12 @@ export function SuperAdminDashboard({ data }: SuperAdminDashboardProps) {
                     <Button
                       variant="primary"
                       size="sm"
-                      disabled={isProcessing === item.id}
-                      onClick={() => handleApprove(item.id, item.taskTitle)}
+                      onClick={() => handleOpenDecision(item, "APPROVED")}
                       className="bg-emerald-600 hover:bg-emerald-500 border-emerald-500/50 text-xs"
                       title="Validation définitive"
                     >
                       <CheckCircle2 size={14} className="mr-1" />
-                      {isProcessing === item.id ? "Validation..." : "Valider Définitivement"}
+                      Valider Définitivement
                     </Button>
                   </div>
                 </div>
@@ -333,6 +325,17 @@ export function SuperAdminDashboard({ data }: SuperAdminDashboardProps) {
           ))}
         </div>
       </div>
+
+      {/* Decision Modal */}
+      {activeModal && (
+        <ApprovalDecisionModal
+          isOpen={true}
+          onClose={() => setActiveModal(null)}
+          submission={activeModal.submission}
+          decisionType={activeModal.decisionType}
+          onSuccess={handleDecisionSuccess}
+        />
+      )}
     </div>
   );
 }

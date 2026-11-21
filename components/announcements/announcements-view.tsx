@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   Megaphone,
   Plus,
@@ -169,13 +170,21 @@ export function AnnouncementsView({
 
       {/* Announcements Stream */}
       {announcements.length === 0 ? (
-        <Card className="text-center py-12">
-          <Megaphone size={40} className="mx-auto text-slate-600 mb-3" />
-          <h3 className="text-sm font-semibold text-white">Aucune annonce publiée</h3>
-          <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-            Les directives officielles et communications internes apparaîtront ici.
-          </p>
-        </Card>
+        <EmptyState
+          icon={Megaphone}
+          title="Aucune annonce publiée"
+          description="Les directives officielles et communications internes du bureau exécutif apparaîtront ici."
+          action={
+            userRole === "SUPER_ADMIN"
+              ? {
+                  label: "Publier une Annonce",
+                  onClick: () => setIsCreateOpen(true),
+                  icon: Plus,
+                  variant: "outline",
+                }
+              : undefined
+          }
+        />
       ) : (
         <div className="space-y-4">
           {announcements.map((ann) => {
@@ -263,11 +272,12 @@ export function AnnouncementsView({
 
       {/* Creation Modal */}
       {isCreateOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#111827] border border-[#27354F] rounded-2xl w-full max-w-lg shadow-2xl p-6 relative">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-[#0e0e12] border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl shadow-black/90 p-6 relative">
             <button
               onClick={() => setIsCreateOpen(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white"
+              className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors focus:outline-none focus:ring-2 focus:ring-uec-blue"
+              aria-label="Fermer"
             >
               <X size={20} />
             </button>

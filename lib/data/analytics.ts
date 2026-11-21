@@ -115,7 +115,7 @@ export async function getAnalyticsData(): Promise<AnalyticsData> {
   );
   const equip = equipData || [];
   const availableEquip = equip.filter((e: any) => e.status === "AVAILABLE").length;
-  const loanedEquip = equip.filter((e: any) => e.status === "LOANED").length;
+  const loanedEquip = equip.filter((e: any) => e.status === "LOANED" || e.status === "BORROWED").length;
 
   // 5. Department metrics
   const depts = await getDepartments();

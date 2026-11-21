@@ -4,7 +4,13 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireProfile, AuthorizationError } from "@/lib/auth/rbac";
-import type { RequestCategory, RequestPriority, RequestStatus } from "@/lib/data/requests";
+import {
+  type RequestCategory,
+  type RequestPriority,
+  type RequestStatus,
+  toDbRequestCategory,
+  toDbRequestStatus,
+} from "@/lib/data/requests";
 
 const UuidSchema = z.string().uuid("ID invalide");
 
@@ -67,7 +73,7 @@ export async function createServiceRequestAction(rawInput: unknown): Promise<Act
       code,
       title: data.title,
       description: data.description,
-      category: data.category,
+      category: toDbRequestCategory(data.category),
       target_department_id: data.target_department_id,
       requesting_department_id: data.requesting_department_id || null,
       requester_id: user.id,
@@ -155,7 +161,7 @@ export async function updateRequestStatusAction(
     }
 
     const updatePayload: any = {
-      status: validStatus.data,
+      status: toDbRequestStatus(validStatus.data),
       updated_at: new Date().toISOString(),
     };
 
@@ -264,7 +270,7 @@ export async function convertRequestToTaskAction(requestId: string): Promise<Act
     // 3. Update the request
     await (supabase.from("service_requests") as any)
       .update({
-        status: "CONVERTED_TO_TASK",
+        status: toDbRequestStatus("CONVERTED_TO_TASK"),
         converted_task_id: task.id,
         assigned_coordinator_id: user.id,
         updated_at: new Date().toISOString(),

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { StatCard } from "@/components/ui/stat-card";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   Users2,
   Plus,
@@ -428,13 +429,21 @@ export function MeetingsView({
 
       {/* Meetings List */}
       {filteredMeetings.length === 0 ? (
-        <Card className="text-center py-12">
-          <Users2 size={40} className="mx-auto text-slate-600 mb-3" />
-          <h3 className="text-sm font-semibold text-white">Aucune réunion trouvée</h3>
-          <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-            Aucune session de réunion n'est programmée pour ces critères.
-          </p>
-        </Card>
+        <EmptyState
+          icon={Users2}
+          title="Aucune réunion trouvée"
+          description="Aucune session de réunion n'est programmée pour ces critères de recherche."
+          action={
+            userRole === "SUPER_ADMIN" || userRole === "COORDINATOR"
+              ? {
+                  label: "Planifier une Réunion",
+                  onClick: () => setIsCreateOpen(true),
+                  icon: Plus,
+                  variant: "outline",
+                }
+              : undefined
+          }
+        />
       ) : (
         <div className="space-y-4">
           {filteredMeetings.map((m) => {
@@ -568,11 +577,12 @@ export function MeetingsView({
 
       {/* Plan Meeting Modal */}
       {isCreateOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#111827] border border-[#27354F] rounded-2xl w-full max-w-lg shadow-2xl p-6 relative max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-[#0e0e12] border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl shadow-black/90 p-6 relative max-h-[90vh] overflow-y-auto">
             <button
               onClick={() => setIsCreateOpen(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white"
+              className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors focus:outline-none focus:ring-2 focus:ring-uec-blue"
+              aria-label="Fermer"
             >
               <X size={20} />
             </button>
@@ -692,7 +702,8 @@ export function MeetingsView({
                         <button
                           type="button"
                           onClick={() => handleRemoveAgenda(idx)}
-                          className="text-slate-400 hover:text-rose-400"
+                          className="text-slate-400 hover:text-rose-400 focus:outline-none focus:ring-1 focus:ring-rose-500 rounded"
+                          aria-label="Supprimer ce point de l'ordre du jour"
                         >
                           <X size={14} />
                         </button>
@@ -749,11 +760,12 @@ export function MeetingsView({
 
       {/* Minutes (PV) Modal */}
       {selectedMeetingMinutes && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#111827] border border-[#27354F] rounded-2xl w-full max-w-2xl shadow-2xl p-6 relative max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-[#0e0e12] border border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl shadow-black/90 p-6 relative max-h-[90vh] overflow-y-auto">
             <button
               onClick={() => setSelectedMeetingMinutes(null)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white"
+              className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors focus:outline-none focus:ring-2 focus:ring-uec-blue"
+              aria-label="Fermer"
             >
               <X size={20} />
             </button>

@@ -21,6 +21,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           <input
             type={type}
             ref={ref}
+            aria-invalid={!!error}
             className={cn(
               "w-full bg-[#111827] text-uec-text placeholder-uec-muted/50 text-sm rounded-lg border border-uec-border focus:border-uec-blue focus:ring-1 focus:ring-uec-blue focus:outline-none transition-all duration-150 py-2.5 px-3.5",
               icon ? "pl-10 rtl:pl-3.5 rtl:pr-10" : "",
@@ -30,7 +31,11 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
             {...props}
           />
         </div>
-        {error && <p className="text-xs text-red-400 font-medium pl-1">{error}</p>}
+        {error && (
+          <p className="text-xs text-red-400 font-medium pl-1 rtl:pl-0 rtl:pr-1" role="alert">
+            {error}
+          </p>
+        )}
       </div>
     );
   }

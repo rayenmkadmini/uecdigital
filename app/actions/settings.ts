@@ -9,6 +9,7 @@ const ProfileUpdateSchema = z.object({
   full_name: z.string().min(2, "Le nom doit comporter au moins 2 caractères").max(100),
   phone: z.string().optional().nullable(),
   bio: z.string().max(500).optional().nullable(),
+  avatar_url: z.string().url().optional().nullable().or(z.literal("")),
 });
 
 const PreferencesUpdateSchema = z.object({
@@ -41,21 +42,36 @@ export async function updateProfileSettingsAction(rawInput: unknown): Promise<Ac
     const data = parseResult.data;
     const supabase = await createClient();
 
+    const updatePayload: Record<string, any> = {
+      full_name: data.full_name,
+      phone: data.phone || null,
+      bio: data.bio || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (data.avatar_url !== undefined) {
+      updatePayload.avatar_url = data.avatar_url || null;
+    }
+
     const { data: updated, error } = await (supabase.from("profiles") as any)
-      .update({
-        full_name: data.full_name,
-        phone: data.phone || null,
-        bio: data.bio || null,
-        updated_at: new Date().toISOString(),
-      })
+      .update(updatePayload)
       .eq("id", user.id)
-      .select("id, full_name, phone, bio")
+      .select("id, full_name, phone, bio, avatar_url")
       .single();
 
-    if (error) {
+    if (error || !updated) {
       console.error("Supabase update profile error:", error);
-      return { success: false, message: `Erreur: ${error.message}` };
+      return { success: false, message: `Erreur: ${error?.message}` };
     }
+
+    // Audit log
+    await (supabase.from("activity_logs") as any).insert({
+      actor_id: user.id,
+      action: "UPDATE_PROFILE_SETTINGS",
+      entity_type: "profiles",
+      entity_id: user.id,
+      details: { full_name: updated.full_name },
+    });
 
     revalidatePath("/dashboard");
     revalidatePath("/dashboard/settings");
@@ -101,6 +117,15 @@ export async function updateUserPreferencesAction(rawInput: unknown): Promise<Ac
       console.error("Supabase upsert preferences error:", error);
       return { success: false, message: `Erreur: ${error.message}` };
     }
+
+    // Audit log
+    await (supabase.from("activity_logs") as any).insert({
+      actor_id: user.id,
+      action: "UPDATE_USER_PREFERENCES",
+      entity_type: "user_preferences",
+      entity_id: user.id,
+      details: { theme: data.theme, language: data.language },
+    });
 
     revalidatePath("/dashboard/settings");
     return {

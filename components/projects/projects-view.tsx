@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   FolderKanban,
   Plus,
@@ -240,21 +241,21 @@ export function ProjectsView({
 
       {/* Projects Grid */}
       {filtered.length === 0 ? (
-        <Card className="p-12 text-center text-slate-400 space-y-3">
-          <FolderKanban size={40} className="mx-auto text-slate-600" />
-          <h3 className="text-base font-bold text-white">Aucun projet trouvé</h3>
-          <p className="text-xs text-slate-400 max-w-sm mx-auto">
-            Aucun projet ne correspond aux filtres sélectionnés ou la base de données ne contient pas encore de projets.
-          </p>
-          {canCreate && (
-            <div className="pt-2">
-              <Button variant="outline" size="sm" onClick={handleOpenCreate}>
-                <Plus size={14} className="mr-1" />
-                Créer le premier projet
-              </Button>
-            </div>
-          )}
-        </Card>
+        <EmptyState
+          icon={FolderKanban}
+          title="Aucun projet trouvé"
+          description="Aucun projet ne correspond aux filtres sélectionnés ou la base de données ne contient pas encore de projets."
+          action={
+            canCreate
+              ? {
+                  label: "Créer le premier projet",
+                  onClick: handleOpenCreate,
+                  icon: Plus,
+                  variant: "outline",
+                }
+              : undefined
+          }
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {filtered.map((proj) => (
@@ -370,11 +371,12 @@ export function ProjectsView({
 
       {/* MODAL: Nouveau Projet */}
       {isCreateOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="bg-[#111827] border border-[#27354F] rounded-xl max-w-lg w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-150">
+          <div className="bg-[#0e0e12] border border-white/10 rounded-2xl max-w-lg w-full p-6 shadow-2xl shadow-black/90 relative max-h-[90vh] overflow-y-auto">
             <button
               onClick={() => setIsCreateOpen(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white"
+              className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors focus:outline-none focus:ring-2 focus:ring-uec-blue"
+              aria-label="Fermer"
             >
               <X size={18} />
             </button>
@@ -543,11 +545,12 @@ export function ProjectsView({
 
       {/* MODAL: Quick Update Status / Progress */}
       {editingProject && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="bg-[#111827] border border-[#27354F] rounded-xl max-w-sm w-full p-6 shadow-2xl relative">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-150">
+          <div className="bg-[#0e0e12] border border-white/10 rounded-2xl max-w-sm w-full p-6 shadow-2xl shadow-black/90 relative">
             <button
               onClick={() => setEditingProject(null)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white"
+              className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors focus:outline-none focus:ring-2 focus:ring-uec-blue"
+              aria-label="Fermer"
             >
               <X size={18} />
             </button>

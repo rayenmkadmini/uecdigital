@@ -40,12 +40,13 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       <button
         ref={ref}
         disabled={disabled || isLoading}
+        aria-busy={isLoading}
         className={cn(baseStyles, variants[variant], sizes[size], className)}
         {...props}
       >
         {isLoading && (
           <svg
-            className="animate-spin -ml-1 mr-2 h-4 w-4 text-current"
+            className="animate-spin -ml-1 mr-2 rtl:-mr-1 rtl:ml-2 h-4 w-4 text-current shrink-0"
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
             viewBox="0 0 24 24"

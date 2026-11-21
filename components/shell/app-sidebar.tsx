@@ -79,7 +79,7 @@ export function AppSidebar({
           title: t("nav.approvals"),
           href: "/dashboard/approvals",
           icon: ShieldCheck,
-          badge: isSuperAdmin ? "EXCLUSIF" : "ADMIN",
+          badge: isSuperAdmin ? t("commandPalette.exclusive") : t("commandPalette.admin"),
           badgeVariant: "superAdmin" as const,
         },
       ],
@@ -97,7 +97,7 @@ export function AppSidebar({
           title: t("nav.users"),
           href: "/dashboard/users",
           icon: Users,
-          badge: isSuperAdmin ? "ADMIN" : null,
+          badge: isSuperAdmin ? t("commandPalette.admin") : null,
           badgeVariant: "superAdmin" as const,
         },
         {
@@ -237,7 +237,7 @@ export function AppSidebar({
         <div className="px-4 py-3 bg-[#111827]/70 border-b border-[#1F2937]">
           {!collapsed ? (
             <div className="flex items-center justify-between">
-              <div className="flex flex-col truncate pr-2">
+              <div className="flex flex-col truncate pr-2 rtl:pr-0 rtl:pl-2">
                 <span className="text-[10px] font-semibold text-uec-muted uppercase">
                   Profil Connecté
                 </span>

@@ -21,6 +21,86 @@ export type EquipmentStatus = "AVAILABLE" | "LOANED" | "MAINTENANCE" | "RETIRED"
 
 export type LoanStatus = "REQUESTED" | "ACTIVE" | "RETURNED" | "OVERDUE" | "REJECTED";
 
+export function toDbEquipmentCategory(cat: string): string {
+  switch (cat) {
+    case "PHOTO_VIDEO":
+      return "CAMERAS";
+    case "AUDIO":
+      return "MICROPHONES";
+    case "INFORMATIQUE":
+      return "COMPUTERS";
+    case "ACCESSOIRES":
+      return "STABILIZERS";
+    case "SONO":
+      return "LIGHTING";
+    case "LOGISTIQUE":
+      return "STORAGE_DEVICES";
+    case "AUTRE":
+      return "OTHER";
+    default:
+      return cat;
+  }
+}
+
+export function fromDbEquipmentCategory(cat: string): EquipmentCategory {
+  switch (cat) {
+    case "CAMERAS":
+    case "LENSES":
+      return "PHOTO_VIDEO";
+    case "MICROPHONES":
+      return "AUDIO";
+    case "COMPUTERS":
+      return "INFORMATIQUE";
+    case "STABILIZERS":
+      return "ACCESSOIRES";
+    case "LIGHTING":
+      return "SONO";
+    case "STORAGE_DEVICES":
+      return "LOGISTIQUE";
+    case "OTHER":
+      return "AUTRE";
+    default:
+      return (cat as EquipmentCategory) || "AUTRE";
+  }
+}
+
+export function toDbEquipmentCondition(cond: string): string {
+  switch (cond) {
+    case "DAMAGED":
+    case "MAINTENANCE":
+      return "POOR";
+    default:
+      return cond;
+  }
+}
+
+export function fromDbEquipmentCondition(cond: string): EquipmentCondition {
+  switch (cond) {
+    case "POOR":
+      return "DAMAGED";
+    default:
+      return (cond as EquipmentCondition) || "GOOD";
+  }
+}
+
+export function toDbEquipmentStatus(st: string): string {
+  switch (st) {
+    case "LOANED":
+      return "BORROWED";
+    default:
+      return st;
+  }
+}
+
+export function fromDbEquipmentStatus(st: string): EquipmentStatus {
+  switch (st) {
+    case "BORROWED":
+      return "LOANED";
+    default:
+      return (st as EquipmentStatus) || "AVAILABLE";
+  }
+}
+
 export interface EquipmentLoanItem {
   id: string;
   equipment_id: string;
@@ -87,11 +167,11 @@ export async function getEquipmentList(filter?: EquipmentFilter): Promise<Equipm
     .order("code", { ascending: true });
 
   if (filter?.category && filter.category !== "ALL") {
-    query = query.eq("category", filter.category);
+    query = query.eq("category", toDbEquipmentCategory(filter.category));
   }
 
   if (filter?.status && filter.status !== "ALL") {
-    query = query.eq("status", filter.status);
+    query = query.eq("status", toDbEquipmentStatus(filter.status));
   }
 
   if (filter?.search?.trim()) {
@@ -174,11 +254,11 @@ export async function getEquipmentList(filter?: EquipmentFilter): Promise<Equipm
       id: eq.id,
       code: eq.code,
       name: eq.name,
-      category: eq.category as EquipmentCategory,
+      category: fromDbEquipmentCategory(eq.category),
       description: eq.description,
       serial_number: eq.serial_number,
-      condition: eq.condition as EquipmentCondition,
-      status: eq.status as EquipmentStatus,
+      condition: fromDbEquipmentCondition(eq.condition),
+      status: fromDbEquipmentStatus(eq.status),
       storage_location: eq.storage_location,
       purchase_date: eq.purchase_date,
       photo_url: eq.photo_url,

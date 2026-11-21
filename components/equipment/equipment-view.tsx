@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatCard } from "@/components/ui/stat-card";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   Package,
   Plus,
@@ -409,13 +410,21 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
 
       {/* Equipment List */}
       {filteredEquipment.length === 0 ? (
-        <Card className="text-center py-12">
-          <Package size={40} className="mx-auto text-slate-600 mb-3" />
-          <h3 className="text-sm font-semibold text-white">Aucun matériel trouvé</h3>
-          <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-            Aucun équipement ne correspond à vos critères de recherche.
-          </p>
-        </Card>
+        <EmptyState
+          icon={Package}
+          title="Aucun matériel trouvé"
+          description="Aucun équipement ne correspond à vos critères de recherche dans l'inventaire UEC."
+          action={
+            userRole === "SUPER_ADMIN" || userRole === "COORDINATOR"
+              ? {
+                  label: "Ajouter un Équipement",
+                  onClick: () => setIsAddOpen(true),
+                  icon: Plus,
+                  variant: "outline",
+                }
+              : undefined
+          }
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredEquipment.map((eq) => {
@@ -546,11 +555,12 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
 
       {/* Add Equipment Modal */}
       {isAddOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#111827] border border-[#27354F] rounded-2xl w-full max-w-lg shadow-2xl p-6 relative">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-[#0e0e12] border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl shadow-black/90 p-6 relative">
             <button
               onClick={() => setIsAddOpen(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white"
+              className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors focus:outline-none focus:ring-2 focus:ring-uec-blue"
+              aria-label="Fermer"
             >
               <X size={20} />
             </button>
@@ -685,11 +695,12 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
 
       {/* Loan Request Modal */}
       {loanTarget && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#111827] border border-[#27354F] rounded-2xl w-full max-w-md shadow-2xl p-6 relative">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-[#0e0e12] border border-white/10 rounded-2xl w-full max-w-md shadow-2xl shadow-black/90 p-6 relative">
             <button
               onClick={() => setLoanTarget(null)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white"
+              className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors focus:outline-none focus:ring-2 focus:ring-uec-blue"
+              aria-label="Fermer"
             >
               <X size={20} />
             </button>
@@ -753,11 +764,12 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
 
       {/* Return Equipment Modal */}
       {returnTarget && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#111827] border border-[#27354F] rounded-2xl w-full max-w-md shadow-2xl p-6 relative">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-[#0e0e12] border border-white/10 rounded-2xl w-full max-w-md shadow-2xl shadow-black/90 p-6 relative">
             <button
               onClick={() => setReturnTarget(null)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white"
+              className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors focus:outline-none focus:ring-2 focus:ring-uec-blue"
+              aria-label="Fermer"
             >
               <X size={20} />
             </button>
