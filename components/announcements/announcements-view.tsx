@@ -28,6 +28,8 @@ import {
   deleteAnnouncementAction,
 } from "@/app/actions/announcements";
 import { AnnouncementEditModal } from "./announcement-edit-modal";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 
 interface AnnouncementsViewProps {
   initialAnnouncements: AnnouncementItem[];
@@ -69,7 +71,9 @@ export function AnnouncementsView({
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingAnnouncement, setEditingAnnouncement] = useState<AnnouncementItem | null>(null);
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<AnnouncementItem | null>(null);
 
+  const { showToast } = useToast();
   const [isPending, startTransition] = useTransition();
   const [actionMessage, setActionMessage] = useState<{ text: string; error?: boolean } | null>(null);
 
@@ -144,18 +148,18 @@ export function AnnouncementsView({
     });
   };
 
-  const handleDeleteAnnouncement = (id: string, title: string) => {
-    if (!confirm(`Supprimer définitivement l'annonce "${title}" ?`)) return;
+  const handleConfirmDeleteAnnouncement = () => {
+    if (!deleteTarget) return;
 
     startTransition(async () => {
-      const res = await deleteAnnouncementAction(id);
+      const res = await deleteAnnouncementAction(deleteTarget.id);
       if (res.success) {
-        setAnnouncements((prev) => prev.filter((a) => a.id !== id));
-        setActionMessage({ text: "Annonce supprimée avec succès." });
+        setAnnouncements((prev) => prev.filter((a) => a.id !== deleteTarget.id));
+        showToast("Annonce supprimée avec succès.", "success");
+        setDeleteTarget(null);
       } else {
-        setActionMessage({ text: res.message, error: true });
+        showToast(res.message, "error");
       }
-      setTimeout(() => setActionMessage(null), 3000);
     });
   };
 
@@ -354,7 +358,7 @@ export function AnnouncementsView({
                             <Edit2 size={13} />
                           </button>
                           <button
-                            onClick={() => handleDeleteAnnouncement(ann.id, ann.title)}
+                            onClick={() => setDeleteTarget(ann)}
                             disabled={isPending}
                             className="p-1 text-slate-400 hover:text-rose-400 transition-colors"
                             title="Supprimer l'annonce"
@@ -532,6 +536,18 @@ export function AnnouncementsView({
           setActionMessage({ text: "Annonce mise à jour avec succès." });
           setTimeout(() => setActionMessage(null), 3000);
         }}
+      />
+      {/* Confirm Delete Announcement Dialog */}
+      <ConfirmDialog
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDeleteAnnouncement}
+        title="Supprimer définitivement l'annonce ?"
+        description={`Êtes-vous certain de vouloir supprimer l'annonce officielle "${deleteTarget?.title}" ? Cette information ne sera plus visible par les membres ciblés.`}
+        confirmLabel="Supprimer l'annonce"
+        cancelLabel="Conserver"
+        variant="danger"
+        isLoading={isPending}
       />
     </div>
   );

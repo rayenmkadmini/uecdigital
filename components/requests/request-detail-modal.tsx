@@ -1,9 +1,10 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { Modal } from "@/components/ui/modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Inbox,
   User,
@@ -47,6 +48,8 @@ export function RequestDetailModal({
   onComplete,
   onDelete,
 }: RequestDetailModalProps) {
+  const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
+
   if (!request) return null;
 
   return (
@@ -202,11 +205,7 @@ export function RequestDetailModal({
                 variant="ghost"
                 size="sm"
                 disabled={isPending}
-                onClick={() => {
-                  if (confirm(`Confirmez-vous la suppression de la demande ${request.code} ?`)) {
-                    onDelete?.(request.id);
-                  }
-                }}
+                onClick={() => setIsConfirmDeleteOpen(true)}
                 className="text-rose-400 hover:text-rose-300 hover:bg-rose-950/30"
               >
                 <Trash2 size={14} className="mr-1" />
@@ -273,6 +272,21 @@ export function RequestDetailModal({
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        isOpen={isConfirmDeleteOpen}
+        onClose={() => setIsConfirmDeleteOpen(false)}
+        onConfirm={() => {
+          setIsConfirmDeleteOpen(false);
+          onDelete?.(request.id);
+        }}
+        title="Supprimer la demande de prestation ?"
+        description={`Confirmez-vous la suppression définitive du dossier ${request.code} (${request.title}) ?`}
+        confirmLabel="Supprimer"
+        cancelLabel="Annuler"
+        variant="danger"
+        isLoading={isPending}
+      />
     </Modal>
   );
 }

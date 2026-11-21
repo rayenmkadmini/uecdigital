@@ -28,6 +28,8 @@ import type { MemberListItem } from "@/lib/data/members";
 import type { UserRole } from "@/lib/auth/rbac";
 import { deleteProjectAction } from "@/app/actions/projects";
 import { ProjectModal } from "./project-modal";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 
 interface ProjectsViewProps {
   projects: ProjectListItem[];
@@ -44,6 +46,7 @@ export function ProjectsView({
   userRole,
   currentUserId,
 }: ProjectsViewProps) {
+  const { showToast } = useToast();
   const [projects, setProjects] = useState<ProjectListItem[]>(initialProjects);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
@@ -52,6 +55,7 @@ export function ProjectsView({
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedProject, setSelectedProject] = useState<ProjectListItem | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ProjectListItem | null>(null);
   const [isPending, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
@@ -68,24 +72,21 @@ export function ProjectsView({
     setIsModalOpen(true);
   };
 
-  const handleDeleteProject = (project: ProjectListItem) => {
-    if (!confirm(`Supprimer définitivement le projet "${project.title}" (${project.code}) ?`)) {
-      return;
-    }
+  const handleConfirmDeleteProject = () => {
+    if (!deleteTarget) return;
 
     startTransition(async () => {
       try {
-        const res = await deleteProjectAction(project.id);
+        const res = await deleteProjectAction(deleteTarget.id);
         if (res.success) {
-          setProjects((prev) => prev.filter((p) => p.id !== project.id));
-          setFeedback({ type: "success", message: res.message });
+          setProjects((prev) => prev.filter((p) => p.id !== deleteTarget.id));
+          showToast(res.message, "success");
+          setDeleteTarget(null);
         } else {
-          setFeedback({ type: "error", message: res.message });
+          showToast(res.message, "error");
         }
       } catch (err: any) {
-        setFeedback({ type: "error", message: err?.message || "Erreur de suppression" });
-      } finally {
-        setTimeout(() => setFeedback(null), 3000);
+        showToast(err?.message || "Erreur de suppression du projet", "error");
       }
     });
   };
@@ -256,7 +257,7 @@ export function ProjectsView({
                           <Edit2 size={13} />
                         </button>
                         <button
-                          onClick={() => handleDeleteProject(proj)}
+                          onClick={() => setDeleteTarget(proj)}
                           disabled={isPending}
                           className="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded transition-colors"
                           title="Supprimer le projet"
@@ -351,6 +352,18 @@ export function ProjectsView({
           }
           setTimeout(() => setFeedback(null), 3000);
         }}
+      />
+      {/* Confirm Delete Project Dialog */}
+      <ConfirmDialog
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDeleteProject}
+        title="Supprimer définitivement le projet ?"
+        description={`Êtes-vous certain de vouloir supprimer le projet "${deleteTarget?.title}" (${deleteTarget?.code}) ? Cette action est irréversible et supprimera l'ensemble des dépendances associées.`}
+        confirmLabel="Supprimer le projet"
+        cancelLabel="Conserver"
+        variant="danger"
+        isLoading={isPending}
       />
     </div>
   );

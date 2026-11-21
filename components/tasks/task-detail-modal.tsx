@@ -1,9 +1,10 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { Modal } from "@/components/ui/modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   CheckSquare,
   Building2,
@@ -47,6 +48,8 @@ export function TaskDetailModal({
   onEditTask,
   onDeleteTask,
 }: TaskDetailModalProps) {
+  const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
+
   if (!task) return null;
 
   const isAssigned = task.assignees.some((a) => a.user_id === currentUserId);
@@ -193,11 +196,7 @@ export function TaskDetailModal({
                 variant="ghost"
                 size="sm"
                 disabled={isPending}
-                onClick={() => {
-                  if (confirm(`Confirmez-vous la suppression de la tâche "${task.title}" ?`)) {
-                    onDeleteTask(task.id);
-                  }
-                }}
+                onClick={() => setIsConfirmDeleteOpen(true)}
                 className="text-rose-400 hover:text-rose-300 hover:bg-rose-950/30"
               >
                 <Trash2 size={14} className="mr-1" />
@@ -258,6 +257,21 @@ export function TaskDetailModal({
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        isOpen={isConfirmDeleteOpen}
+        onClose={() => setIsConfirmDeleteOpen(false)}
+        onConfirm={() => {
+          setIsConfirmDeleteOpen(false);
+          onDeleteTask(task.id);
+        }}
+        title="Supprimer la tâche ?"
+        description={`Confirmez-vous la suppression définitive de la tâche "${task.title}" ? Cette action est irréversible.`}
+        confirmLabel="Supprimer la tâche"
+        cancelLabel="Conserver"
+        variant="danger"
+        isLoading={isPending}
+      />
     </Modal>
   );
 }

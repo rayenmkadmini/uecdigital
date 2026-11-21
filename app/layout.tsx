@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { I18nProvider } from "@/lib/i18n/context";
 import { AuthProvider } from "@/lib/auth/auth-context";
+import { ToastProvider } from "@/components/ui/toast";
 
 export const metadata: Metadata = {
   title: "UEC — Espace Digital | Union des Étudiants Clubistes",
@@ -25,7 +26,9 @@ export default function RootLayout({
       </head>
       <body className="bg-[#0B1020] text-slate-100 min-h-screen antialiased">
         <I18nProvider>
-          <AuthProvider>{children}</AuthProvider>
+          <AuthProvider>
+            <ToastProvider>{children}</ToastProvider>
+          </AuthProvider>
         </I18nProvider>
       </body>
     </html>

@@ -38,6 +38,8 @@ import {
   rsvpMeetingAction,
   deleteMeetingAction,
 } from "@/app/actions/meetings";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 
 interface MeetingsViewProps {
   initialMeetings: MeetingListItem[];
@@ -79,6 +81,10 @@ export function MeetingsView({
   const [deptFilter, setDeptFilter] = useState<string>("ALL");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selectedMeetingMinutes, setSelectedMeetingMinutes] = useState<MeetingListItem | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<MeetingListItem | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<MeetingListItem | null>(null);
+
+  const { showToast } = useToast();
   const [isPending, startTransition] = useTransition();
   const [actionMessage, setActionMessage] = useState<{ text: string; error?: boolean } | null>(null);
 
@@ -234,23 +240,25 @@ export function MeetingsView({
     });
   };
 
-  const handleCancelMeeting = (meetingId: string, title: string) => {
-    if (!confirm(`Confirmez-vous l'annulation de la réunion "${title}" ? Les participants recevront une notification.`)) return;
-    handleStatusChange(meetingId, "CANCELLED");
+  const handleConfirmCancelMeeting = () => {
+    if (!cancelTarget) return;
+    handleStatusChange(cancelTarget.id, "CANCELLED");
+    showToast("Réunion annulée. Les participants ont été notifiés.", "info");
+    setCancelTarget(null);
   };
 
-  const handleDeleteMeeting = (meetingId: string, title: string) => {
-    if (!confirm(`Supprimer définitivement la réunion "${title}" ?`)) return;
+  const handleConfirmDeleteMeeting = () => {
+    if (!deleteTarget) return;
 
     startTransition(async () => {
-      const res = await deleteMeetingAction(meetingId);
+      const res = await deleteMeetingAction(deleteTarget.id);
       if (res.success) {
-        setMeetings((prev) => prev.filter((m) => m.id !== meetingId));
-        setActionMessage({ text: "Réunion supprimée avec succès." });
+        setMeetings((prev) => prev.filter((m) => m.id !== deleteTarget.id));
+        showToast("Réunion supprimée avec succès.", "success");
+        setDeleteTarget(null);
       } else {
-        setActionMessage({ text: res.message, error: true });
+        showToast(res.message, "error");
       }
-      setTimeout(() => setActionMessage(null), 3000);
     });
   };
 
@@ -550,7 +558,7 @@ export function MeetingsView({
                           variant="ghost"
                           size="sm"
                           disabled={isPending}
-                          onClick={() => handleCancelMeeting(m.id, m.title)}
+                          onClick={() => setCancelTarget(m)}
                           className="text-rose-400 hover:text-rose-300"
                           title="Annuler la réunion"
                         >
@@ -564,7 +572,7 @@ export function MeetingsView({
                           variant="ghost"
                           size="sm"
                           disabled={isPending}
-                          onClick={() => handleDeleteMeeting(m.id, m.title)}
+                          onClick={() => setDeleteTarget(m)}
                           className="text-slate-400 hover:text-rose-400"
                           title="Supprimer la réunion"
                         >
@@ -983,6 +991,31 @@ export function MeetingsView({
           </div>
         </div>
       )}
+      {/* Confirm Cancel Meeting Dialog */}
+      <ConfirmDialog
+        isOpen={!!cancelTarget}
+        onClose={() => setCancelTarget(null)}
+        onConfirm={handleConfirmCancelMeeting}
+        title="Annuler la réunion ?"
+        description={`Confirmez-vous l'annulation de la séance "${cancelTarget?.title}" ? Les participants recevront une notification.`}
+        confirmLabel="Annuler la séance"
+        cancelLabel="Maintenir"
+        variant="warning"
+        isLoading={isPending}
+      />
+
+      {/* Confirm Delete Meeting Dialog */}
+      <ConfirmDialog
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDeleteMeeting}
+        title="Supprimer définitivement la réunion ?"
+        description={`Êtes-vous certain de vouloir supprimer définitivement la réunion "${deleteTarget?.title}" et l'historique associé ?`}
+        confirmLabel="Supprimer la réunion"
+        cancelLabel="Conserver"
+        variant="danger"
+        isLoading={isPending}
+      />
     </div>
   );
 }

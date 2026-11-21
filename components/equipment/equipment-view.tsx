@@ -43,6 +43,8 @@ import {
   returnEquipmentAction,
 } from "@/app/actions/equipment";
 import { EquipmentEditModal } from "./equipment-edit-modal";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 
 interface EquipmentViewProps {
   initialEquipment: EquipmentListItem[];
@@ -111,7 +113,9 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [loanTarget, setLoanTarget] = useState<EquipmentListItem | null>(null);
   const [returnTarget, setReturnTarget] = useState<EquipmentListItem | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<EquipmentListItem | null>(null);
 
+  const { showToast } = useToast();
   const [isPending, startTransition] = useTransition();
   const [actionMessage, setActionMessage] = useState<{ text: string; error?: boolean } | null>(null);
 
@@ -210,20 +214,18 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
     });
   };
 
-  const handleDeleteEquipment = (eq: EquipmentListItem) => {
-    if (!confirm(`Supprimer définitivement l'équipement "${eq.name}" (${eq.code}) de l'inventaire ?`)) {
-      return;
-    }
+  const handleConfirmDeleteEquipment = () => {
+    if (!deleteTarget) return;
 
     startTransition(async () => {
-      const res = await deleteEquipmentAction(eq.id);
+      const res = await deleteEquipmentAction(deleteTarget.id);
       if (res.success) {
-        setEquipment((prev) => prev.filter((e) => e.id !== eq.id));
-        setActionMessage({ text: "Matériel supprimé avec succès." });
+        setEquipment((prev) => prev.filter((e) => e.id !== deleteTarget.id));
+        showToast("Matériel supprimé de l'inventaire avec succès.", "success");
+        setDeleteTarget(null);
       } else {
-        setActionMessage({ text: res.message, error: true });
+        showToast(res.message, "error");
       }
-      setTimeout(() => setActionMessage(null), 3000);
     });
   };
 
@@ -534,7 +536,7 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
                             <Edit2 size={13} />
                           </button>
                           <button
-                            onClick={() => handleDeleteEquipment(eq)}
+                            onClick={() => setDeleteTarget(eq)}
                             disabled={isPending}
                             className="p-1 text-slate-400 hover:text-rose-400 rounded transition-colors"
                             title="Supprimer l'équipement"
@@ -1029,6 +1031,18 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
           setActionMessage({ text: "Fiche matériel mise à jour avec succès." });
           setTimeout(() => setActionMessage(null), 3000);
         }}
+      />
+      {/* Confirm Delete Equipment Dialog */}
+      <ConfirmDialog
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDeleteEquipment}
+        title="Supprimer définitivement l'équipement ?"
+        description={`Êtes-vous certain de vouloir supprimer "${deleteTarget?.name}" (${deleteTarget?.code}) du parc logistique ? Cette action est irréversible.`}
+        confirmLabel="Supprimer définitivement"
+        cancelLabel="Conserver"
+        variant="danger"
+        isLoading={isPending}
       />
     </div>
   );

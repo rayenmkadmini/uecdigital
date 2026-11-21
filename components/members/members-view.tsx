@@ -29,6 +29,8 @@ import {
   updateMemberRoleAction,
   toggleMemberActiveStatusAction,
 } from "@/app/actions/members";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 
 interface MembersViewProps {
   members: MemberListItem[];
@@ -48,8 +50,10 @@ export function MembersView({
 
   // Selected member for modal management
   const [selectedMember, setSelectedMember] = useState<MemberListItem | null>(null);
+  const [statusToggleTarget, setStatusToggleTarget] = useState<MemberListItem | null>(null);
   const [targetDeptId, setTargetDeptId] = useState<string>("");
   const [targetRole, setTargetRole] = useState<UserRole>("MEMBER");
+  const { showToast } = useToast();
   const [isPending, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
@@ -158,28 +162,36 @@ export function MembersView({
     });
   };
 
-  const handleToggleStatus = (member: MemberListItem) => {
-    const actionLabel = member.is_active ? "suspendre" : "réactiver";
-    if (!confirm(`Confirmez-vous vouloir ${actionLabel} le compte de ${member.full_name} ?`)) {
-      return;
-    }
+  const handleConfirmToggleStatus = () => {
+    if (!statusToggleTarget) return;
 
     startTransition(async () => {
       try {
-        const res = await toggleMemberActiveStatusAction(member.id, !member.is_active);
+        const res = await toggleMemberActiveStatusAction(
+          statusToggleTarget.id,
+          !statusToggleTarget.is_active
+        );
         if (res.success) {
           setMembers((prev) =>
-            prev.map((m) => (m.id === member.id ? { ...m, is_active: !member.is_active } : m))
+            prev.map((m) =>
+              m.id === statusToggleTarget.id
+                ? { ...m, is_active: !statusToggleTarget.is_active }
+                : m
+            )
           );
-          if (selectedMember?.id === member.id) {
-            setSelectedMember({ ...selectedMember, is_active: !member.is_active });
+          if (selectedMember?.id === statusToggleTarget.id) {
+            setSelectedMember({
+              ...selectedMember,
+              is_active: !statusToggleTarget.is_active,
+            });
           }
-          setFeedback({ type: "success", message: res.message });
+          showToast(res.message, "success");
+          setStatusToggleTarget(null);
         } else {
-          setFeedback({ type: "error", message: res.message });
+          showToast(res.message, "error");
         }
       } catch (err: any) {
-        setFeedback({ type: "error", message: err.message || "Erreur de changement de statut" });
+        showToast(err.message || "Erreur de changement de statut", "error");
       }
     });
   };
@@ -322,7 +334,7 @@ export function MembersView({
                           variant="ghost"
                           size="sm"
                           disabled={isPending}
-                          onClick={() => handleToggleStatus(member)}
+                          onClick={() => setStatusToggleTarget(member)}
                           className={`text-xs flex items-center gap-1 ${
                             member.is_active
                               ? "text-slate-400 hover:text-rose-400"
@@ -468,6 +480,28 @@ export function MembersView({
           </div>
         </div>
       )}
+      {/* Confirm Member Status Toggle Dialog */}
+      <ConfirmDialog
+        isOpen={!!statusToggleTarget}
+        onClose={() => setStatusToggleTarget(null)}
+        onConfirm={handleConfirmToggleStatus}
+        title={
+          statusToggleTarget?.is_active
+            ? "Suspendre le compte membre ?"
+            : "Réactiver le compte membre ?"
+        }
+        description={`Confirmez-vous vouloir ${
+          statusToggleTarget?.is_active ? "suspendre" : "réactiver"
+        } l'accès de ${statusToggleTarget?.full_name} (${statusToggleTarget?.email}) à la plateforme UEC ?`}
+        confirmLabel={
+          statusToggleTarget?.is_active
+            ? "Suspendre l'accès"
+            : "Réactiver le compte"
+        }
+        cancelLabel="Annuler"
+        variant={statusToggleTarget?.is_active ? "warning" : "info"}
+        isLoading={isPending}
+      />
     </div>
   );
 }

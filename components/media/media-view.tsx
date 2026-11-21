@@ -35,6 +35,8 @@ import {
   deleteMediaFileAction,
 } from "@/app/actions/media";
 import { MediaEditModal } from "./media-edit-modal";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 
 interface MediaViewProps {
   initialFiles: MediaFileItem[];
@@ -65,6 +67,8 @@ export function MediaView({ initialFiles, departments, userRole }: MediaViewProp
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [previewItem, setPreviewItem] = useState<MediaFileItem | null>(null);
 
+  const { showToast } = useToast();
+  const [deleteTarget, setDeleteTarget] = useState<MediaFileItem | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [actionMessage, setActionMessage] = useState<{ text: string; error?: boolean } | null>(null);
@@ -107,18 +111,18 @@ export function MediaView({ initialFiles, departments, userRole }: MediaViewProp
     setTimeout(() => setActionMessage(null), 3000);
   };
 
-  const handleDeleteFile = (fileId: string, title: string) => {
-    if (!confirm(`Supprimer définitivement le fichier "${title}" de la médiathèque ?`)) return;
+  const handleConfirmDeleteFile = () => {
+    if (!deleteTarget) return;
 
     startTransition(async () => {
-      const res = await deleteMediaFileAction(fileId);
+      const res = await deleteMediaFileAction(deleteTarget.id);
       if (res.success) {
-        setFiles((prev) => prev.filter((f) => f.id !== fileId));
-        setActionMessage({ text: "Fichier supprimé avec succès." });
+        setFiles((prev) => prev.filter((f) => f.id !== deleteTarget.id));
+        showToast("Fichier supprimé avec succès.", "success");
+        setDeleteTarget(null);
       } else {
-        setActionMessage({ text: res.message, error: true });
+        showToast(res.message, "error");
       }
-      setTimeout(() => setActionMessage(null), 3000);
     });
   };
 
@@ -440,7 +444,7 @@ export function MediaView({ initialFiles, departments, userRole }: MediaViewProp
                             <Edit2 size={13} />
                           </button>
                           <button
-                            onClick={() => handleDeleteFile(file.id, file.title)}
+                            onClick={() => setDeleteTarget(file)}
                             disabled={isPending}
                             className="p-1 hover:text-rose-400 transition-colors"
                             title="Supprimer le fichier"
@@ -523,7 +527,7 @@ export function MediaView({ initialFiles, departments, userRole }: MediaViewProp
                         <Edit2 size={13} />
                       </button>
                       <button
-                        onClick={() => handleDeleteFile(file.id, file.title)}
+                        onClick={() => setDeleteTarget(file)}
                         disabled={isPending}
                         className="p-1.5 rounded-lg border border-[#1F2937] bg-[#111827] text-slate-400 hover:text-rose-400"
                         title="Supprimer"
@@ -730,6 +734,18 @@ export function MediaView({ initialFiles, departments, userRole }: MediaViewProp
           </div>
         </div>
       )}
+      {/* Confirm Delete Media File Dialog */}
+      <ConfirmDialog
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDeleteFile}
+        title="Supprimer définitivement le fichier ?"
+        description={`Êtes-vous certain de vouloir supprimer le fichier "${deleteTarget?.title}" de la médiathèque ? Les liens directs vers cette ressource cesseront de fonctionner.`}
+        confirmLabel="Supprimer le fichier"
+        cancelLabel="Conserver"
+        variant="danger"
+        isLoading={isPending}
+      />
     </div>
   );
 }
