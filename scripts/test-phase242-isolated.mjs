@@ -23,18 +23,18 @@ async function runRuntimeTests() {
     CREATE SCHEMA IF NOT EXISTS private;
     CREATE SCHEMA IF NOT EXISTS auth;
 
-    -- Setup helper settings table for auth simulation in test
-    CREATE TABLE IF NOT EXISTS auth._test_context (
-      key text PRIMARY KEY,
-      value text
-    );
-
     CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid AS $$
-      SELECT NULLIF(value, '')::uuid FROM auth._test_context WHERE key = 'uid';
+      SELECT COALESCE(
+        NULLIF(current_setting('request.jwt.claim.sub', true), ''),
+        (NULLIF(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')
+      )::uuid;
     $$ LANGUAGE sql STABLE;
 
     CREATE OR REPLACE FUNCTION auth.role() RETURNS text AS $$
-      SELECT NULLIF(value, '') FROM auth._test_context WHERE key = 'role';
+      SELECT COALESCE(
+        NULLIF(current_setting('request.jwt.claim.role', true), ''),
+        (NULLIF(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role')
+      )::text;
     $$ LANGUAGE sql STABLE;
 
     -- Tables
@@ -158,13 +158,11 @@ async function runRuntimeTests() {
 
   console.log("-> Base schema and existing triggers created.");
 
-  // Test Context Switcher Helper
+  // Test Context Switcher Helper using real Supabase GUC settings
   async function setAuthContext(uid, role) {
     await db.exec(`
-      INSERT INTO auth._test_context (key, value) VALUES ('uid', ${uid ? `'${uid}'` : "NULL"})
-      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
-      INSERT INTO auth._test_context (key, value) VALUES ('role', ${role ? `'${role}'` : "NULL"})
-      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+      SELECT set_config('request.jwt.claim.sub', ${uid ? `'${uid}'` : "''"}, false);
+      SELECT set_config('request.jwt.claim.role', ${role ? `'${role}'` : "''"}, false);
     `);
   }
 
@@ -220,7 +218,7 @@ async function runRuntimeTests() {
       v_is_dept_coordinator boolean := false;
     BEGIN
       -- 1. Trusted System Superuser Bypass
-      IF session_user = 'postgres' AND auth.uid() IS NULL AND auth.role() IS NULL THEN
+      IF session_user IN ('postgres', 'supabase_admin') AND auth.uid() IS NULL AND auth.role() IS NULL THEN
         RETURN NEW;
       END IF;
 
