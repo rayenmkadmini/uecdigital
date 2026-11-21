@@ -3,9 +3,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { User } from "@supabase/supabase-js";
-import type { Database } from "@/types/database";
-
-export type UserRole = "SUPER_ADMIN" | "COORDINATOR" | "MEMBER";
+import type { UserRole } from "@/lib/auth/rbac";
 
 export interface UserProfile {
   id: string;
@@ -23,43 +21,11 @@ export interface UserProfile {
 interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
-  role: UserRole;
+  role: UserRole | null;
   loading: boolean;
-  isDemoMode: boolean;
-  setDemoRole: (role: UserRole) => void;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
-
-const DEMO_PROFILES: Record<UserRole, UserProfile> = {
-  SUPER_ADMIN: {
-    id: "demo-super-admin-001",
-    email: "superadmin@uec.tn",
-    full_name: "Yassine Ben Salem (Super Admin)",
-    role: "SUPER_ADMIN",
-    is_active: true,
-    department_name: "Direction Digitale",
-    department_code: "EXECUTIVE",
-  },
-  COORDINATOR: {
-    id: "demo-coordinator-002",
-    email: "coordinateur.design@uec.tn",
-    full_name: "Nourhene Trabelsi (Coordinatrice)",
-    role: "COORDINATOR",
-    is_active: true,
-    department_name: "Pôle Créatif & Design",
-    department_code: "DESIGN",
-  },
-  MEMBER: {
-    id: "demo-member-003",
-    email: "membre.video@uec.tn",
-    full_name: "Ahmed Karray (Membre)",
-    role: "MEMBER",
-    is_active: true,
-    department_name: "Pôle Audiovisuel & Montage",
-    department_code: "VIDEO",
-  },
-};
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
@@ -67,11 +33,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [supabase] = useState(() => createClient());
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [role, setRole] = useState<UserRole>("SUPER_ADMIN");
+  const [role, setRole] = useState<UserRole | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isDemoMode, setIsDemoMode] = useState(true);
 
-  const fetchProfile = useCallback(async (userId: string, userEmail: string) => {
+  const fetchProfile = useCallback(async (userId: string, userEmail: string): Promise<UserProfile | null> => {
     try {
       const { data: dbProfile, error: profileErr } = await supabase
         .from("profiles")
@@ -80,7 +45,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .maybeSingle();
 
       if (profileErr || !dbProfile) {
-        console.warn("Could not fetch database profile, falling back:", profileErr);
         return null;
       }
 
@@ -93,17 +57,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         is_active: boolean;
       };
 
-      // Fetch department
+      if (!rawProfile.is_active) {
+        return null;
+      }
+
+      // Fetch department membership
       const { data: deptMember } = await supabase
         .from("department_members")
-        .select("department_id, departments(name, code)")
+        .select("department_id, departments(id, name, code)")
         .eq("user_id", userId)
         .eq("is_active", true)
         .maybeSingle();
 
       const rawDeptMember = deptMember as unknown as {
         department_id: string;
-        departments: { name: string; code: string } | null;
+        departments: { id: string; name: string; code: string } | null;
       } | null;
 
       const loadedProfile: UserProfile = {
@@ -121,7 +89,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       return loadedProfile;
     } catch (err) {
-      console.error("Error in fetchProfile:", err);
+      console.error("Error fetching trusted profile:", err);
       return null;
     }
   }, [supabase]);
@@ -133,38 +101,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (session?.user) {
         setUser(session.user);
-        setIsDemoMode(false);
         const userProfile = await fetchProfile(session.user.id, session.user.email || "");
         if (userProfile) {
           setProfile(userProfile);
           setRole(userProfile.role);
         } else {
-          const defaultProf: UserProfile = {
-            id: session.user.id,
-            email: session.user.email || "",
-            full_name: session.user.email?.split("@")[0] || "Membre UEC",
-            role: "MEMBER",
-            is_active: true,
-          };
-          setProfile(defaultProf);
-          setRole("MEMBER");
+          // User exists in Auth but profile not ready
+          setUser(session.user);
+          setProfile(null);
+          setRole(null);
         }
       } else {
-        const savedDemoRole = (typeof window !== "undefined"
-          ? (localStorage.getItem("uec_demo_role") || "SUPER_ADMIN")
-          : "SUPER_ADMIN") as UserRole;
-
-        const effectiveRole = ["SUPER_ADMIN", "COORDINATOR", "MEMBER"].includes(savedDemoRole)
-          ? savedDemoRole
-          : "SUPER_ADMIN";
-
+        // STRICT SECURITY: Unauthenticated users have NULL identity.
+        // No client-side demo role or arbitrary cookie is ever trusted.
         setUser(null);
-        setIsDemoMode(true);
-        setRole(effectiveRole);
-        setProfile(DEMO_PROFILES[effectiveRole]);
+        setProfile(null);
+        setRole(null);
       }
     } catch (err) {
-      console.error("Error loading session:", err);
+      console.error("Error loading auth session:", err);
+      setUser(null);
+      setProfile(null);
+      setRole(null);
     } finally {
       setLoading(false);
     }
@@ -178,14 +136,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
         setUser(session.user);
-        setIsDemoMode(false);
         const p = await fetchProfile(session.user.id, session.user.email || "");
         if (p) {
           setProfile(p);
           setRole(p.role);
+        } else {
+          setProfile(null);
+          setRole(null);
         }
       } else {
         setUser(null);
+        setProfile(null);
+        setRole(null);
       }
     });
 
@@ -194,24 +156,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [supabase, loadSession, fetchProfile]);
 
-  const setDemoRole = (newRole: UserRole) => {
-    setIsDemoMode(true);
-    setRole(newRole);
-    setProfile(DEMO_PROFILES[newRole]);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("uec_demo_role", newRole);
-      document.cookie = `uec_demo_role=${newRole}; path=/; max-age=604800; SameSite=Lax`;
-    }
-  };
-
   const signOut = async () => {
-    if (user) {
+    try {
       await supabase.auth.signOut();
-    }
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("uec_demo_role");
-      document.cookie = "uec_demo_role=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
-      window.location.href = "/login";
+    } finally {
+      setUser(null);
+      setProfile(null);
+      setRole(null);
+      if (typeof window !== "undefined") {
+        window.location.href = "/login";
+      }
     }
   };
 
@@ -232,8 +186,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         profile,
         role,
         loading,
-        isDemoMode,
-        setDemoRole,
         signOut,
         refreshProfile,
       }}

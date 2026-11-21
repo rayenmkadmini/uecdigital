@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Settings, User, Globe, Bell, Shield, Save, CheckCircle2 } from "lucide-react";
 
 export default function SettingsPage() {
-  const { profile, role, isDemoMode } = useAuth();
+  const { profile, role } = useAuth();
   const { locale, setLocale, t, dir } = useTranslation();
   const [fullName, setFullName] = useState(profile?.full_name || "");
   const [phone, setPhone] = useState(profile?.phone || "");

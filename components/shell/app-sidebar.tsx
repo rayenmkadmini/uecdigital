@@ -4,7 +4,7 @@ import React from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { useAuth, type UserRole } from "@/lib/auth/auth-context";
+import { useAuth } from "@/lib/auth/auth-context";
 import { useTranslation } from "@/lib/i18n/context";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -25,8 +25,8 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-  Sparkles,
 } from "lucide-react";
+import type { UserRole } from "@/lib/auth/rbac";
 
 interface AppSidebarProps {
   collapsed?: boolean;
@@ -42,11 +42,10 @@ export function AppSidebar({
   onCloseMobile,
 }: AppSidebarProps) {
   const pathname = usePathname();
-  const { role, setDemoRole, isDemoMode, profile } = useAuth();
+  const { role, profile } = useAuth();
   const { t, dir } = useTranslation();
 
   const isSuperAdmin = role === "SUPER_ADMIN";
-  const isCoordinator = role === "COORDINATOR";
 
   const navigationSections = [
     {
@@ -75,12 +74,12 @@ export function AppSidebar({
           icon: CheckSquare,
           badge: null,
         },
-        // Approvals is visible to everyone, but highlighted for Super Admin
+        // Approvals is visible to everyone in nav, but protected server-side for Super Admin
         {
           title: t("nav.approvals"),
           href: "/dashboard/approvals",
           icon: ShieldCheck,
-          badge: isSuperAdmin ? "EXCLUSIF" : null,
+          badge: isSuperAdmin ? "EXCLUSIF" : "ADMIN",
           badgeVariant: "superAdmin" as const,
         },
       ],
@@ -98,7 +97,8 @@ export function AppSidebar({
           title: t("nav.users"),
           href: "/dashboard/users",
           icon: Users,
-          badge: null,
+          badge: isSuperAdmin ? "ADMIN" : null,
+          badgeVariant: "superAdmin" as const,
         },
         {
           title: t("nav.requests"),
@@ -237,20 +237,22 @@ export function AppSidebar({
         <div className="px-4 py-3 bg-[#111827]/70 border-b border-[#1F2937]">
           {!collapsed ? (
             <div className="flex items-center justify-between">
-              <div className="flex flex-col">
+              <div className="flex flex-col truncate pr-2">
                 <span className="text-[10px] font-semibold text-uec-muted uppercase">
-                  Rôle Actif
+                  Profil Connecté
                 </span>
                 <span className="text-xs font-bold text-slate-200 truncate">
-                  {profile?.full_name || t(`roles.${role}`)}
+                  {profile?.full_name || "Chargement..."}
                 </span>
               </div>
-              <Badge variant={roleBadgeVariants[role]}>
-                {t(`roles.${role}`)}
-              </Badge>
+              {role && (
+                <Badge variant={roleBadgeVariants[role]}>
+                  {t(`roles.${role}`)}
+                </Badge>
+              )}
             </div>
           ) : (
-            <div className="flex justify-center" title={t(`roles.${role}`)}>
+            <div className="flex justify-center" title={role ? t(`roles.${role}`) : "UEC"}>
               <span className="h-2.5 w-2.5 rounded-full bg-uec-red animate-pulse" />
             </div>
           )}
@@ -311,54 +313,6 @@ export function AppSidebar({
             </div>
           ))}
         </div>
-
-        {/* Role Preview Switcher (Quick Dev Testing) */}
-        {!collapsed && isDemoMode && (
-          <div className="p-3 mx-3 mb-3 bg-[#111827] border border-[#27354F] rounded-lg">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-cyan-400 mb-2">
-              <Sparkles size={12} />
-              <span>Aperçu de Rôle (Test)</span>
-            </div>
-            <div className="grid grid-cols-3 gap-1">
-              <button
-                type="button"
-                onClick={() => setDemoRole("SUPER_ADMIN")}
-                className={cn(
-                  "text-[10px] py-1 px-1 rounded text-center font-bold transition-all",
-                  role === "SUPER_ADMIN"
-                    ? "bg-uec-red text-white shadow"
-                    : "bg-slate-800/80 text-slate-400 hover:text-white"
-                )}
-              >
-                Admin
-              </button>
-              <button
-                type="button"
-                onClick={() => setDemoRole("COORDINATOR")}
-                className={cn(
-                  "text-[10px] py-1 px-1 rounded text-center font-bold transition-all",
-                  role === "COORDINATOR"
-                    ? "bg-uec-blue text-white shadow"
-                    : "bg-slate-800/80 text-slate-400 hover:text-white"
-                )}
-              >
-                Coord
-              </button>
-              <button
-                type="button"
-                onClick={() => setDemoRole("MEMBER")}
-                className={cn(
-                  "text-[10px] py-1 px-1 rounded text-center font-bold transition-all",
-                  role === "MEMBER"
-                    ? "bg-slate-600 text-white shadow"
-                    : "bg-slate-800/80 text-slate-400 hover:text-white"
-                )}
-              >
-                Membre
-              </button>
-            </div>
-          </div>
-        )}
       </aside>
     </>
   );

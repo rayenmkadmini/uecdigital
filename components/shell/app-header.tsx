@@ -26,7 +26,7 @@ interface AppHeaderProps {
 
 export function AppHeader({ onOpenMobileMenu, collapsed = false }: AppHeaderProps) {
   const pathname = usePathname();
-  const { profile, role, signOut, isDemoMode } = useAuth();
+  const { profile, role, signOut } = useAuth();
   const { locale, setLocale, t, dir } = useTranslation();
   const [isLangOpen, setIsLangOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -220,22 +220,19 @@ export function AppHeader({ onOpenMobileMenu, collapsed = false }: AppHeaderProp
                 </p>
                 <p className="text-[11px] text-uec-muted truncate">{profile?.email}</p>
                 <div className="mt-1.5 flex items-center gap-1.5">
-                  <Badge
-                    variant={
-                      role === "SUPER_ADMIN"
-                        ? "superAdmin"
-                        : role === "COORDINATOR"
-                        ? "coordinator"
-                        : "member"
-                    }
-                    size="sm"
-                  >
-                    {t(`roles.${role}`)}
-                  </Badge>
-                  {isDemoMode && (
-                    <span className="text-[9px] text-cyan-400 font-semibold px-1 py-0.5 rounded bg-cyan-950/60 border border-cyan-800">
-                      PREVIEW
-                    </span>
+                  {role && (
+                    <Badge
+                      variant={
+                        role === "SUPER_ADMIN"
+                          ? "superAdmin"
+                          : role === "COORDINATOR"
+                          ? "coordinator"
+                          : "member"
+                      }
+                      size="sm"
+                    >
+                      {t(`roles.${role}`)}
+                    </Badge>
                   )}
                 </div>
               </div>

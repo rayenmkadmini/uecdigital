@@ -5,18 +5,15 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { useAuth, type UserRole } from "@/lib/auth/auth-context";
 import { useTranslation } from "@/lib/i18n/context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Mail, Lock, Eye, EyeOff, ShieldAlert, Sparkles, ArrowRight } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, ShieldAlert, ArrowRight, ExternalLink } from "lucide-react";
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectPath = searchParams.get("redirect") || "/dashboard";
-  const { setDemoRole } = useAuth();
   const { t } = useTranslation();
 
   const [email, setEmail] = useState("");
@@ -48,16 +45,12 @@ function LoginForm() {
         return;
       }
 
-      router.push(redirectPath);
+      // Hard redirect to ensure server-side middleware and cookies sync
+      window.location.href = redirectPath;
     } catch (err: any) {
       setErrorMessage(err.message || "Une erreur inattendue est survenue.");
       setIsLoading(false);
     }
-  };
-
-  const handleDemoLogin = (role: UserRole) => {
-    setDemoRole(role);
-    router.push(redirectPath);
   };
 
   return (
@@ -126,56 +119,18 @@ function LoginForm() {
         </Button>
       </form>
 
-      {/* Quick Demo Role Switcher */}
-      <div className="pt-4 border-t border-[#1F2937] space-y-3">
-        <div className="flex items-center justify-between text-xs text-slate-400">
-          <span className="flex items-center gap-1.5 font-semibold text-cyan-400">
-            <Sparkles size={14} />
-            <span>Accès Démo Immédiat</span>
-          </span>
-          <span className="text-[10px] text-slate-400">1-clic preview</span>
-        </div>
-
-        <div className="grid grid-cols-3 gap-2">
-          <button
-            type="button"
-            onClick={() => handleDemoLogin("SUPER_ADMIN")}
-            className="p-2.5 rounded-lg bg-[#172033] border border-red-900/50 hover:border-uec-red hover:bg-red-950/30 transition-all text-center group"
-          >
-            <span className="block text-xs font-bold text-red-300 group-hover:text-red-200">
-              Super Admin
-            </span>
-            <span className="block text-[9px] text-slate-400 mt-0.5">
-              Direction
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleDemoLogin("COORDINATOR")}
-            className="p-2.5 rounded-lg bg-[#172033] border border-blue-900/50 hover:border-uec-blue hover:bg-blue-950/30 transition-all text-center group"
-          >
-            <span className="block text-xs font-bold text-blue-300 group-hover:text-blue-200">
-              Coordinateur
-            </span>
-            <span className="block text-[9px] text-slate-400 mt-0.5">
-              Design & Équipe
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleDemoLogin("MEMBER")}
-            className="p-2.5 rounded-lg bg-[#172033] border border-slate-700 hover:border-slate-500 hover:bg-slate-800 transition-all text-center group"
-          >
-            <span className="block text-xs font-bold text-slate-200 group-hover:text-white">
-              Membre
-            </span>
-            <span className="block text-[9px] text-slate-400 mt-0.5">
-              Production
-            </span>
-          </button>
-        </div>
+      {/* Isolated Static UI Preview Link (Sandboxed, No Auth Bypass) */}
+      <div className="pt-4 border-t border-[#1F2937] text-center">
+        <Link
+          href="/preview"
+          className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-uec-cyan transition-colors"
+        >
+          <span>Consulter le bac à sable de prévisualisation UI</span>
+          <ExternalLink size={12} />
+        </Link>
+        <p className="text-[10px] text-slate-400 mt-0.5">
+          Environnement isolé sans persistance ni accès base de données
+        </p>
       </div>
     </div>
   );

@@ -29,7 +29,7 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  // Refresh auth token
+  // Server-side authentication check using verified Supabase JWT
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -42,18 +42,17 @@ export async function updateSession(request: NextRequest) {
 
   const isDashboardRoute = request.nextUrl.pathname.startsWith("/dashboard");
 
-  // If user is not logged in and accessing dashboard, allow dev preview or redirect
+  // STRICT SECURITY RULE (CRIT-01 FIX):
+  // Unauthenticated requests to /dashboard/* MUST ALWAYS be redirected to /login.
+  // No client-side cookie or header is ever permitted to bypass authentication.
   if (!user && isDashboardRoute) {
-    const demoRole = request.cookies.get("uec_demo_role")?.value;
-    if (!demoRole) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/login";
-      url.searchParams.set("redirect", request.nextUrl.pathname);
-      return NextResponse.redirect(url);
-    }
+    const url = request.nextUrl.clone();
+    url.pathname = "/login";
+    url.searchParams.set("redirect", request.nextUrl.pathname);
+    return NextResponse.redirect(url);
   }
 
-  // If logged in and on login route, redirect to dashboard
+  // If already authenticated and on login routes, redirect to dashboard
   if (user && isAuthRoute && !request.nextUrl.pathname.startsWith("/auth/callback")) {
     const url = request.nextUrl.clone();
     url.pathname = "/dashboard";
