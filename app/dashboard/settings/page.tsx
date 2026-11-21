@@ -1,25 +1,73 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useTransition } from "react";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useTranslation, type Locale } from "@/lib/i18n/context";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Settings, User, Globe, Bell, Shield, Save, CheckCircle2 } from "lucide-react";
+import { Settings, User, Globe, Bell, Shield, Save, CheckCircle2, AlertCircle } from "lucide-react";
+import { updateProfileSettingsAction, updateUserPreferencesAction } from "@/app/actions/settings";
 
 export default function SettingsPage() {
-  const { profile, role } = useAuth();
+  const { profile, role, refreshProfile } = useAuth();
   const { locale, setLocale, t, dir } = useTranslation();
   const [fullName, setFullName] = useState(profile?.full_name || "");
   const [phone, setPhone] = useState(profile?.phone || "");
-  const [savedNotice, setSavedNotice] = useState(false);
+  const [bio, setBio] = useState(profile?.bio || "");
+  const [emailNotifs, setEmailNotifs] = useState(true);
+  const [pushNotifs, setPushNotifs] = useState(true);
+  const [isPending, startTransition] = useTransition();
+  const [actionMessage, setActionMessage] = useState<{ text: string; error?: boolean } | null>(null);
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleProfileSave = (e: React.FormEvent) => {
     e.preventDefault();
-    setSavedNotice(true);
-    setTimeout(() => setSavedNotice(false), 3000);
+    startTransition(async () => {
+      const res = await updateProfileSettingsAction({
+        full_name: fullName,
+        phone: phone || null,
+        bio: bio || null,
+      });
+
+      if (res.success) {
+        setActionMessage({ text: res.message });
+        if (refreshProfile) refreshProfile();
+      } else {
+        setActionMessage({ text: res.message, error: true });
+      }
+      setTimeout(() => setActionMessage(null), 4000);
+    });
+  };
+
+  const handleLanguageChange = (newLocale: Locale) => {
+    setLocale(newLocale);
+    startTransition(async () => {
+      await updateUserPreferencesAction({
+        language: newLocale,
+        theme: "dark",
+        email_notifications: emailNotifs,
+        push_notifications: pushNotifs,
+      });
+      setActionMessage({ text: "Langue mise à jour et mémorisée" });
+      setTimeout(() => setActionMessage(null), 3000);
+    });
+  };
+
+  const handleNotifToggle = (type: "email" | "push", checked: boolean) => {
+    if (type === "email") setEmailNotifs(checked);
+    if (type === "push") setPushNotifs(checked);
+
+    startTransition(async () => {
+      await updateUserPreferencesAction({
+        language: locale,
+        theme: "dark",
+        email_notifications: type === "email" ? checked : emailNotifs,
+        push_notifications: type === "push" ? checked : pushNotifs,
+      });
+      setActionMessage({ text: "Préférences de notification enregistrées" });
+      setTimeout(() => setActionMessage(null), 3000);
+    });
   };
 
   return (
@@ -34,10 +82,20 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      {savedNotice && (
-        <div className="p-3.5 rounded-xl bg-emerald-950/70 border border-emerald-700 text-xs text-emerald-200 flex items-center gap-2 shadow-lg">
-          <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
-          <span>Vos préférences ont été enregistrées avec succès.</span>
+      {actionMessage && (
+        <div
+          className={`p-3.5 rounded-xl border text-xs flex items-center gap-2 shadow-lg transition-all ${
+            actionMessage.error
+              ? "bg-rose-950/70 border-rose-700 text-rose-200"
+              : "bg-emerald-950/70 border-emerald-700 text-emerald-200"
+          }`}
+        >
+          {actionMessage.error ? (
+            <AlertCircle size={16} className="text-rose-400 shrink-0" />
+          ) : (
+            <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+          )}
+          <span>{actionMessage.text}</span>
         </div>
       )}
 
@@ -50,13 +108,14 @@ export default function SettingsPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSave} className="space-y-4">
+          <form onSubmit={handleProfileSave} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Nom Complet
+                  Nom Complet *
                 </label>
                 <Input
+                  required
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="Ex: Yassine Ayari"
@@ -67,7 +126,11 @@ export default function SettingsPage() {
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
                   Adresse Email (Identifiant UEC)
                 </label>
-                <Input value={profile?.email || ""} disabled className="opacity-60 cursor-not-allowed" />
+                <Input
+                  value={profile?.email || ""}
+                  disabled
+                  className="opacity-60 cursor-not-allowed"
+                />
               </div>
 
               <div>
@@ -101,9 +164,22 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            <Button type="submit" variant="primary" size="sm">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                Bio / Rôle au sein du pôle
+              </label>
+              <textarea
+                rows={2}
+                value={bio}
+                onChange={(e) => setBio(e.target.value)}
+                placeholder="Ex: Passionné par la création visuelle et supporter inconditionnel..."
+                className="w-full bg-[#111827] text-xs text-white placeholder-slate-500 rounded-lg p-2.5 border border-[#1F2937] focus:border-uec-blue focus:outline-none"
+              />
+            </div>
+
+            <Button type="submit" variant="primary" size="sm" disabled={isPending}>
               <Save size={14} className="mr-1" />
-              Enregistrer Modifications
+              {isPending ? "Enregistrement..." : "Enregistrer Modifications"}
             </Button>
           </form>
         </CardContent>
@@ -122,19 +198,34 @@ export default function SettingsPage() {
             L'Espace Digital supporte nativement le Français, l'Arabe (avec disposition inversée RTL) et l'Anglais.
           </p>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {[
-              { code: "fr" as Locale, label: "Français", flag: "🇫🇷", desc: "Langue par défaut (LTR)" },
-              { code: "ar" as Locale, label: "العربية", flag: "🇹🇳", desc: "Native RTL (من اليمين لليسار)" },
-              { code: "en" as Locale, label: "English", flag: "🇬🇧", desc: "International (LTR)" },
+              {
+                code: "fr" as Locale,
+                label: "Français",
+                flag: "🇫🇷",
+                desc: "Langue par défaut (LTR)",
+              },
+              {
+                code: "ar" as Locale,
+                label: "العربية",
+                flag: "🇹🇳",
+                desc: "Native RTL (من اليمين لليسار)",
+              },
+              {
+                code: "en" as Locale,
+                label: "English",
+                flag: "🇬🇧",
+                desc: "International (LTR)",
+              },
             ].map((item) => (
               <button
                 key={item.code}
                 type="button"
-                onClick={() => setLocale(item.code)}
+                onClick={() => handleLanguageChange(item.code)}
                 className={`p-3.5 rounded-xl border text-left rtl:text-right transition-all ${
                   locale === item.code
-                    ? "bg-slate-800 border-uec-red shadow-md"
+                    ? "bg-slate-800 border-uec-red shadow-md ring-1 ring-uec-red"
                     : "bg-[#172033] border-[#27354F] hover:border-slate-600"
                 }`}
               >
@@ -145,6 +236,47 @@ export default function SettingsPage() {
                 <p className="text-[10px] text-slate-400 mt-1">{item.desc}</p>
               </button>
             ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Notifications Preferences */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-white flex items-center gap-2">
+            <Bell size={18} className="text-uec-red" />
+            <span>Préférences de Notifications</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-center justify-between p-3 rounded-xl bg-[#0B1020]/60 border border-[#1F2937]">
+            <div>
+              <h4 className="text-xs font-bold text-white">Notifications par Email</h4>
+              <p className="text-[11px] text-slate-400">
+                Recevoir un récapitulatif lors de l'assignation de tâches ou d'approbations.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={emailNotifs}
+              onChange={(e) => handleNotifToggle("email", e.target.checked)}
+              className="rounded bg-[#0B1020] border-slate-700 text-uec-red focus:ring-uec-red cursor-pointer"
+            />
+          </div>
+
+          <div className="flex items-center justify-between p-3 rounded-xl bg-[#0B1020]/60 border border-[#1F2937]">
+            <div>
+              <h4 className="text-xs font-bold text-white">Notifications In-App</h4>
+              <p className="text-[11px] text-slate-400">
+                Afficher les badges et alertes en direct dans la barre de navigation supérieure.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={pushNotifs}
+              onChange={(e) => handleNotifToggle("push", e.target.checked)}
+              className="rounded bg-[#0B1020] border-slate-700 text-uec-red focus:ring-uec-red cursor-pointer"
+            />
           </div>
         </CardContent>
       </Card>

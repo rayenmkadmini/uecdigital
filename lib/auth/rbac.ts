@@ -14,6 +14,7 @@ export interface AuthenticatedUserContext {
     role: UserRole;
     avatar_url: string | null;
     phone: string | null;
+    bio: string | null;
     is_active: boolean;
   };
   department: {
@@ -62,7 +63,7 @@ export async function getCurrentProfile(): Promise<AuthenticatedUserContext | nu
   // 1. Fetch trusted profile from database
   const { data: dbProfile, error: profileErr } = await supabase
     .from("profiles")
-    .select("id, full_name, role, avatar_url, phone, is_active")
+    .select("id, full_name, role, avatar_url, phone, bio, is_active")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -76,6 +77,7 @@ export async function getCurrentProfile(): Promise<AuthenticatedUserContext | nu
     role: string;
     avatar_url: string | null;
     phone: string | null;
+    bio: string | null;
     is_active: boolean;
   };
 
@@ -105,6 +107,7 @@ export async function getCurrentProfile(): Promise<AuthenticatedUserContext | nu
       role: rawProfile.role as UserRole,
       avatar_url: rawProfile.avatar_url,
       phone: rawProfile.phone,
+      bio: rawProfile.bio,
       is_active: rawProfile.is_active,
     },
     department: rawDeptMember?.departments

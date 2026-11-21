@@ -12,6 +12,7 @@ export interface UserProfile {
   avatar_url?: string | null;
   role: UserRole;
   phone?: string | null;
+  bio?: string | null;
   is_active: boolean;
   department_id?: string | null;
   department_name?: string | null;
@@ -40,7 +41,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const { data: dbProfile, error: profileErr } = await supabase
         .from("profiles")
-        .select("id, full_name, role, avatar_url, phone, is_active")
+        .select("id, full_name, role, avatar_url, phone, bio, is_active")
         .eq("id", userId)
         .maybeSingle();
 
@@ -54,6 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         role: string;
         avatar_url: string | null;
         phone: string | null;
+        bio: string | null;
         is_active: boolean;
       };
 
@@ -81,6 +83,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         avatar_url: rawProfile.avatar_url,
         role: rawProfile.role as UserRole,
         phone: rawProfile.phone,
+        bio: rawProfile.bio || null,
         is_active: rawProfile.is_active,
         department_id: rawDeptMember?.department_id,
         department_name: rawDeptMember?.departments?.name,

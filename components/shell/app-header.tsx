@@ -1,12 +1,14 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useTranslation, type Locale } from "@/lib/i18n/context";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { createClient } from "@/lib/supabase/client";
+import { markAllNotificationsAsReadAction, markNotificationAsReadAction } from "@/app/actions/notifications";
 import {
   Menu,
   Bell,
@@ -17,6 +19,7 @@ import {
   ChevronDown,
   Shield,
   Layers,
+  CheckCircle2,
 } from "lucide-react";
 
 interface AppHeaderProps {
@@ -31,6 +34,32 @@ export function AppHeader({ onOpenMobileMenu, collapsed = false }: AppHeaderProp
   const [isLangOpen, setIsLangOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    const supabase = createClient();
+
+    const fetchNotifs = async () => {
+      const { data } = await (supabase.from("notifications") as any)
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(10);
+      if (data) {
+        setNotifications(data);
+        setUnreadCount(data.filter((n: any) => !n.is_read).length);
+      }
+    };
+
+    fetchNotifs();
+  }, [profile?.id]);
+
+  const handleMarkAllRead = async () => {
+    await markAllNotificationsAsReadAction();
+    setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    setUnreadCount(0);
+  };
 
   // Derive breadcrumb from pathname
   const pathSegments = pathname.split("/").filter(Boolean);
@@ -141,7 +170,9 @@ export function AppHeader({ onOpenMobileMenu, collapsed = false }: AppHeaderProp
             aria-label="Notifications"
           >
             <Bell size={16} />
-            <span className="absolute top-1.5 right-1.5 rtl:right-auto rtl:left-1.5 h-2 w-2 rounded-full bg-uec-red ring-2 ring-[#0B1020]" />
+            {unreadCount > 0 && (
+              <span className="absolute top-1.5 right-1.5 rtl:right-auto rtl:left-1.5 h-2 w-2 rounded-full bg-uec-red ring-2 ring-[#0B1020]" />
+            )}
           </button>
 
           {isNotificationsOpen && (
@@ -151,32 +182,56 @@ export function AppHeader({ onOpenMobileMenu, collapsed = false }: AppHeaderProp
               }`}
             >
               <div className="flex items-center justify-between pb-2 border-b border-[#1F2937]">
-                <span className="text-xs font-bold text-white uppercase tracking-wider">
-                  Notifications
-                </span>
-                <span className="text-[10px] text-uec-cyan font-semibold cursor-pointer hover:underline">
-                  Tout marquer comme lu
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-white uppercase tracking-wider">
+                    Notifications
+                  </span>
+                  {unreadCount > 0 && (
+                    <span className="text-[10px] font-bold bg-uec-red/20 text-uec-red border border-uec-red/40 px-1.5 py-0.2 rounded-full">
+                      {unreadCount}
+                    </span>
+                  )}
+                </div>
+                {unreadCount > 0 && (
+                  <button
+                    onClick={handleMarkAllRead}
+                    className="text-[10px] text-uec-cyan font-semibold hover:underline"
+                  >
+                    Tout marquer comme lu
+                  </button>
+                )}
               </div>
-              <div className="py-2 space-y-2 text-xs text-slate-300">
-                <div className="p-2 rounded-lg bg-slate-800/40 border border-[#1F2937] hover:border-slate-700 transition-colors">
-                  <div className="flex items-center justify-between text-[10px] text-uec-muted mb-1">
-                    <span className="text-uec-red font-semibold">Validation Requise</span>
-                    <span>Il y a 10 min</span>
+
+              <div className="py-2 space-y-2 text-xs max-h-72 overflow-y-auto">
+                {notifications.length === 0 ? (
+                  <div className="text-center py-6 text-slate-500 text-xs">
+                    Aucune notification pour le moment.
                   </div>
-                  <p className="text-xs text-white font-medium">
-                    Nouveau livrable vidéo soumis pour la campagne d'adhésion.
-                  </p>
-                </div>
-                <div className="p-2 rounded-lg bg-slate-800/40 border border-[#1F2937] hover:border-slate-700 transition-colors">
-                  <div className="flex items-center justify-between text-[10px] text-uec-muted mb-1">
-                    <span className="text-uec-blue font-semibold">Projet Actif</span>
-                    <span>Il y a 1h</span>
-                  </div>
-                  <p className="text-xs text-white font-medium">
-                    Sprint Refonte Web UEC mis à jour par le coordinateur.
-                  </p>
-                </div>
+                ) : (
+                  notifications.map((n) => (
+                    <div
+                      key={n.id}
+                      className={`p-2.5 rounded-lg border transition-colors ${
+                        n.is_read
+                          ? "bg-slate-900/30 border-[#1F2937] text-slate-400"
+                          : "bg-slate-800/60 border-blue-900/40 text-slate-200"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between text-[10px] mb-1">
+                        <span className="font-semibold text-uec-cyan">{n.title}</span>
+                        <span className="text-slate-500">
+                          {new Date(n.created_at).toLocaleDateString("fr-FR", {
+                            day: "numeric",
+                            month: "short",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      </div>
+                      <p className="text-xs text-white/90 leading-relaxed">{n.message}</p>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )}
