@@ -373,23 +373,67 @@ export async function approveEquipmentLoanAction(loanId: string): Promise<Action
       return { success: false, message: "Emprunt introuvable" };
     }
 
-    // Update loan
-    await (supabase.from("equipment_loans") as any)
+    if (loan.status !== "REQUESTED") {
+      return {
+        success: false,
+        message: `Cette demande d'emprunt n'est plus en attente d'approbation (statut actuel: ${loan.status}).`,
+      };
+    }
+
+    // Verify equipment is currently AVAILABLE before approving
+    const { data: currentEq } = await (supabase.from("equipment") as any)
+      .select("id, status")
+      .eq("id", loan.equipment_id)
+      .single();
+
+    if (!currentEq || currentEq.status !== "AVAILABLE") {
+      return {
+        success: false,
+        message: "Conflit d'emprunt: Ce matériel est actuellement déjà emprunté ou indisponible.",
+      };
+    }
+
+    // Update loan atomically with optimistic concurrency lock on REQUESTED status
+    const { data: updatedLoan, error: updateLoanErr } = await (supabase.from("equipment_loans") as any)
       .update({
         status: "ACTIVE",
         approved_by: user.id,
         borrow_date: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .eq("id", validId.data);
+      .eq("id", validId.data)
+      .eq("status", "REQUESTED")
+      .select("id")
+      .maybeSingle();
 
-    // Update equipment status
-    await (supabase.from("equipment") as any)
+    if (updateLoanErr || !updatedLoan) {
+      return {
+        success: false,
+        message: "Conflit de concurrence: Cette demande d'emprunt a déjà été traitée par un autre administrateur.",
+      };
+    }
+
+    // Atomically transition equipment from AVAILABLE to BORROWED
+    const { data: updatedEq, error: eqErr } = await (supabase.from("equipment") as any)
       .update({
         status: "BORROWED",
         updated_at: new Date().toISOString(),
       })
-      .eq("id", loan.equipment_id);
+      .eq("id", loan.equipment_id)
+      .eq("status", "AVAILABLE")
+      .select("id")
+      .maybeSingle();
+
+    if (eqErr || !updatedEq) {
+      // Rollback loan status if equipment was simultaneously borrowed
+      await (supabase.from("equipment_loans") as any)
+        .update({ status: "REQUESTED", approved_by: null, borrow_date: null })
+        .eq("id", validId.data);
+      return {
+        success: false,
+        message: "Conflit d'allocation: Le matériel vient d'être attribué à un autre utilisateur.",
+      };
+    }
 
     // Audit log
     await (supabase.from("activity_logs") as any).insert({
@@ -450,13 +494,30 @@ export async function rejectEquipmentLoanAction(loanId: string, reason?: string)
       return { success: false, message: "Emprunt introuvable" };
     }
 
-    await (supabase.from("equipment_loans") as any)
+    if (loan.status !== "REQUESTED") {
+      return {
+        success: false,
+        message: `Cette demande d'emprunt n'est plus en attente d'approbation (statut actuel: ${loan.status}).`,
+      };
+    }
+
+    const { data: updatedLoan, error: rejErr } = await (supabase.from("equipment_loans") as any)
       .update({
         status: "REJECTED",
         notes: reason ? `Refusé : ${reason}` : "Demande refusée par la direction",
         updated_at: new Date().toISOString(),
       })
-      .eq("id", validId.data);
+      .eq("id", validId.data)
+      .eq("status", "REQUESTED")
+      .select("id")
+      .maybeSingle();
+
+    if (rejErr || !updatedLoan) {
+      return {
+        success: false,
+        message: "Conflit de concurrence: Cette demande a déjà été traitée par un autre administrateur.",
+      };
+    }
 
     // Audit log
     await (supabase.from("activity_logs") as any).insert({
@@ -515,7 +576,7 @@ export async function returnEquipmentAction(
     const supabase = await createClient();
 
     const { data: loan, error: loanErr } = await (supabase.from("equipment_loans") as any)
-      .select("id, equipment_id, borrower_id")
+      .select("id, equipment_id, borrower_id, status")
       .eq("id", validId.data)
       .single();
 
@@ -523,8 +584,15 @@ export async function returnEquipmentAction(
       return { success: false, message: "Emprunt introuvable" };
     }
 
-    // Update loan
-    await (supabase.from("equipment_loans") as any)
+    if (loan.status !== "ACTIVE") {
+      return {
+        success: false,
+        message: `Cet emprunt n'est pas actif (statut actuel: ${loan.status}).`,
+      };
+    }
+
+    // Update loan with optimistic lock on ACTIVE status
+    const { data: updatedLoan, error: returnErr } = await (supabase.from("equipment_loans") as any)
       .update({
         status: "RETURNED",
         actual_return_date: new Date().toISOString(),
@@ -532,7 +600,17 @@ export async function returnEquipmentAction(
         notes: notes || null,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", validId.data);
+      .eq("id", validId.data)
+      .eq("status", "ACTIVE")
+      .select("id")
+      .maybeSingle();
+
+    if (returnErr || !updatedLoan) {
+      return {
+        success: false,
+        message: "Conflit de concurrence: Ce prêt a déjà été retourné ou clôturé.",
+      };
+    }
 
     // Update equipment
     const newStatus: EquipmentStatus = validCondition.data === "DAMAGED" || validCondition.data === "MAINTENANCE"

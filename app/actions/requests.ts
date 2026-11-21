@@ -240,6 +240,10 @@ export async function convertRequestToTaskAction(requestId: string): Promise<Act
       return { success: false, message: "Demande introuvable" };
     }
 
+    if (req.status === "CONVERTED_TO_TASK" || req.converted_task_id) {
+      return { success: false, message: "Cette demande a déjà été convertie en tâche." };
+    }
+
     const isSuperAdmin = profile.role === "SUPER_ADMIN";
     const isTargetCoord = profile.role === "COORDINATOR" && department?.id === req.target_department_id;
 

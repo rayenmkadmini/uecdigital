@@ -60,15 +60,15 @@ export async function executeFinalApproval(
       title: string;
     };
 
-    if (typedSubmission.is_locked) {
+    if (typedSubmission.is_locked || typedSubmission.status === "APPROVED") {
       return {
         success: false,
         message: "Ce livrable est déjà verrouillé et validé définitivement.",
       };
     }
 
-    // 3. Execute update in PostgreSQL
-    const { error: updateErr } = await (supabase.from("task_submissions") as any)
+    // 3. Execute update in PostgreSQL with optimistic concurrency check
+    const { data: updatedSub, error: updateErr } = await (supabase.from("task_submissions") as any)
       .update({
         status: "APPROVED",
         is_locked: true,
@@ -77,12 +77,22 @@ export async function executeFinalApproval(
         approved_by_super_admin_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .eq("id", submissionId);
+      .eq("id", submissionId)
+      .eq("is_locked", false)
+      .select("id")
+      .maybeSingle();
 
     if (updateErr) {
       return {
         success: false,
         message: `Erreur base de données: ${updateErr.message}`,
+      };
+    }
+
+    if (!updatedSub) {
+      return {
+        success: false,
+        message: "Conflit de concurrence: Ce livrable a déjà été traité ou verrouillé par un autre administrateur.",
       };
     }
 
@@ -224,7 +234,7 @@ export async function submitCoordinatorReview(
     const newSubStatus = validAction.data === "SUBMIT_TO_SUPER_ADMIN" ? "PENDING_SUPER_ADMIN" : "REVISION_REQUIRED";
     const newTaskStatus = validAction.data === "SUBMIT_TO_SUPER_ADMIN" ? "SUPER_ADMIN_APPROVAL" : "REVISION_REQUIRED";
 
-    const { error: updateErr } = await (supabase.from("task_submissions") as any)
+    const { data: updatedSub, error: updateErr } = await (supabase.from("task_submissions") as any)
       .update({
         status: newSubStatus,
         coordinator_id: user.id,
@@ -232,12 +242,22 @@ export async function submitCoordinatorReview(
         reviewed_by_coordinator_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .eq("id", submissionId);
+      .eq("id", submissionId)
+      .eq("is_locked", false)
+      .select("id")
+      .maybeSingle();
 
     if (updateErr) {
       return {
         success: false,
         message: `Erreur lors de la revue: ${updateErr.message}`,
+      };
+    }
+
+    if (!updatedSub) {
+      return {
+        success: false,
+        message: "Conflit de concurrence: Ce livrable a déjà été traité ou verrouillé.",
       };
     }
 
@@ -335,14 +355,29 @@ export async function rejectSubmissionAction(
       return { success: false, message: "Ce livrable est déjà clôturé." };
     }
 
-    await (supabase.from("task_submissions") as any)
+    const { data: updatedSub, error: updateErr } = await (supabase.from("task_submissions") as any)
       .update({
         status: "REJECTED",
+        is_locked: true,
         super_admin_id: user.id,
         super_admin_notes: validReason.data,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", submissionId);
+      .eq("id", submissionId)
+      .eq("is_locked", false)
+      .select("id")
+      .maybeSingle();
+
+    if (updateErr) {
+      return { success: false, message: `Erreur lors du rejet: ${updateErr.message}` };
+    }
+
+    if (!updatedSub) {
+      return {
+        success: false,
+        message: "Conflit de concurrence: Ce livrable a déjà été traité ou verrouillé.",
+      };
+    }
 
     await (supabase.from("tasks") as any)
       .update({ status: "REVISION_REQUIRED", updated_at: new Date().toISOString() })

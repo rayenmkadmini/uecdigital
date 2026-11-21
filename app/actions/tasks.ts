@@ -386,6 +386,27 @@ export async function submitDeliverableAction(
       };
     }
 
+    if (task.status === "COORDINATOR_REVIEW" || task.status === "SUPER_ADMIN_APPROVAL") {
+      return {
+        success: false,
+        message: `FORBIDDEN: Impossible de soumettre un nouveau livrable car la tâche est en statut "${task.status}".`,
+      };
+    }
+
+    // Concurrency guard: verify no active pending submission already exists for this task
+    const { data: activePending } = await (supabase.from("task_submissions") as any)
+      .select("id, status")
+      .eq("task_id", validData.taskId)
+      .in("status", ["PENDING_COORDINATOR", "PENDING_SUPER_ADMIN"])
+      .maybeSingle();
+
+    if (activePending) {
+      return {
+        success: false,
+        message: "Une soumission pour cette tâche est déjà en cours d'examen. Veuillez attendre la revue avant de déposer une nouvelle version.",
+      };
+    }
+
     const isSuperAdmin = profile.role === "SUPER_ADMIN";
     const isDeptCoord = profile.role === "COORDINATOR" && department?.id === task.department_id;
 
