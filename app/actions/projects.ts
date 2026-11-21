@@ -102,10 +102,10 @@ export async function createProjectAction(rawInput: unknown): Promise<ActionResp
       .select("id, code, title")
       .single();
 
-    if (insertErr) {
+    if (insertErr || !newProject) {
       return {
         success: false,
-        message: `Erreur lors de l'enregistrement: ${insertErr.message}`,
+        message: `Erreur lors de l'enregistrement: ${insertErr?.message}`,
       };
     }
 
@@ -187,7 +187,9 @@ export async function updateProjectAction(
       throw new AuthorizationError("FORBIDDEN: Vous n'avez pas les droits de modification sur ce projet.");
     }
 
-    const updatePayload: Record<string, any> = {};
+    const updatePayload: Record<string, any> = {
+      updated_at: new Date().toISOString(),
+    };
     if (data.title) updatePayload.title = data.title;
     if (data.description !== undefined) updatePayload.description = data.description;
     if (data.status) updatePayload.status = data.status;
@@ -204,7 +206,17 @@ export async function updateProjectAction(
       return { success: false, message: updateErr.message };
     }
 
+    // Log activity
+    await (supabase.from("activity_logs") as any).insert({
+      actor_id: user.id,
+      action: "PROJECT_UPDATED",
+      entity_type: "project",
+      entity_id: projectId,
+      details: { title: project.title, changes: updatePayload },
+    });
+
     revalidatePath("/dashboard/projects");
+    revalidatePath(`/dashboard/projects/${projectId}`);
     revalidatePath("/dashboard");
 
     return {
@@ -216,6 +228,68 @@ export async function updateProjectAction(
       success: false,
       message: err.message || "Erreur lors de la mise à jour du projet.",
     };
+  }
+}
+
+/**
+ * Server Action: Delete / Cancel a Project
+ * Authorization: SUPER_ADMIN or COORDINATOR of the project's department.
+ */
+export async function deleteProjectAction(projectId: string): Promise<ActionResponse> {
+  try {
+    const validId = z.string().uuid("ID de projet invalide").safeParse(projectId);
+    if (!validId.success) {
+      return { success: false, message: "ID de projet invalide" };
+    }
+
+    const { user, profile, department } = await requireProfile();
+    const supabase = await createClient();
+
+    const { data: project, error: fetchErr } = await (supabase.from("projects") as any)
+      .select("id, department_id, title, code")
+      .eq("id", projectId)
+      .single();
+
+    if (fetchErr || !project) {
+      return { success: false, message: "Projet introuvable" };
+    }
+
+    const isSuperAdmin = profile.role === "SUPER_ADMIN";
+    const isDeptCoord = profile.role === "COORDINATOR" && department?.id === project.department_id;
+
+    if (!isSuperAdmin && !isDeptCoord) {
+      throw new AuthorizationError("FORBIDDEN: Vous n'avez pas l'autorisation de supprimer ce projet.");
+    }
+
+    // Delete members association first, then project
+    await (supabase.from("project_members") as any).delete().eq("project_id", projectId);
+
+    const { error: delErr } = await (supabase.from("projects") as any)
+      .delete()
+      .eq("id", projectId);
+
+    if (delErr) {
+      return { success: false, message: `Erreur lors de la suppression: ${delErr.message}` };
+    }
+
+    // Log activity
+    await (supabase.from("activity_logs") as any).insert({
+      actor_id: user.id,
+      action: "PROJECT_DELETED",
+      entity_type: "project",
+      entity_id: projectId,
+      details: { title: project.title, code: project.code },
+    });
+
+    revalidatePath("/dashboard/projects");
+    revalidatePath("/dashboard");
+
+    return {
+      success: true,
+      message: `Projet "${project.title}" (${project.code}) supprimé avec succès.`,
+    };
+  } catch (err: any) {
+    return { success: false, message: err.message || "Erreur lors de la suppression du projet." };
   }
 }
 
@@ -236,12 +310,11 @@ export async function assignProjectMemberAction(
       return { success: false, message: "Paramètres d'assignation de projet invalides." };
     }
 
-    const { profile, department } = await requireProfile();
-
+    const { user, profile, department } = await requireProfile();
     const supabase = await createClient();
 
     const { data: project } = await (supabase.from("projects") as any)
-      .select("department_id")
+      .select("id, department_id, title")
       .eq("id", projectId)
       .single();
 
@@ -254,18 +327,89 @@ export async function assignProjectMemberAction(
       throw new AuthorizationError("FORBIDDEN: Vous n'avez pas le droit d'assigner des membres à ce projet.");
     }
 
-    const { error } = await (supabase.from("project_members") as any).insert({
-      project_id: projectId,
-      user_id: userId,
-      role_in_project: validRole.data,
-    });
+    const { error } = await (supabase.from("project_members") as any).upsert(
+      {
+        project_id: projectId,
+        user_id: userId,
+        role_in_project: validRole.data,
+      },
+      { onConflict: "project_id,user_id" }
+    );
 
     if (error) {
       return { success: false, message: error.message };
     }
 
+    // Log activity
+    await (supabase.from("activity_logs") as any).insert({
+      actor_id: user.id,
+      action: "PROJECT_MEMBER_ASSIGNED",
+      entity_type: "project",
+      entity_id: projectId,
+      details: { targetUserId: userId, roleInProject: validRole.data },
+    });
+
     revalidatePath("/dashboard/projects");
-    return { success: true, message: "Membre assigné au projet." };
+    revalidatePath(`/dashboard/projects/${projectId}`);
+    return { success: true, message: "Membre assigné au projet avec succès." };
+  } catch (err: any) {
+    return { success: false, message: err.message };
+  }
+}
+
+/**
+ * Server Action: Remove a member from a project
+ */
+export async function removeProjectMemberAction(
+  projectId: string,
+  userId: string
+): Promise<ActionResponse> {
+  try {
+    const validProj = z.string().uuid("ID de projet invalide").safeParse(projectId);
+    const validUser = z.string().uuid("ID d'utilisateur invalide").safeParse(userId);
+
+    if (!validProj.success || !validUser.success) {
+      return { success: false, message: "Paramètres invalides." };
+    }
+
+    const { user, profile, department } = await requireProfile();
+    const supabase = await createClient();
+
+    const { data: project } = await (supabase.from("projects") as any)
+      .select("id, department_id, title")
+      .eq("id", projectId)
+      .single();
+
+    if (!project) return { success: false, message: "Projet introuvable" };
+
+    const isSuperAdmin = profile.role === "SUPER_ADMIN";
+    const isDeptCoord = profile.role === "COORDINATOR" && department?.id === project.department_id;
+
+    if (!isSuperAdmin && !isDeptCoord && user.id !== userId) {
+      throw new AuthorizationError("FORBIDDEN: Vous n'avez pas le droit de retirer des membres de ce projet.");
+    }
+
+    const { error } = await (supabase.from("project_members") as any)
+      .delete()
+      .eq("project_id", projectId)
+      .eq("user_id", userId);
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    // Log activity
+    await (supabase.from("activity_logs") as any).insert({
+      actor_id: user.id,
+      action: "PROJECT_MEMBER_REMOVED",
+      entity_type: "project",
+      entity_id: projectId,
+      details: { targetUserId: userId },
+    });
+
+    revalidatePath("/dashboard/projects");
+    revalidatePath(`/dashboard/projects/${projectId}`);
+    return { success: true, message: "Membre retiré du projet avec succès." };
   } catch (err: any) {
     return { success: false, message: err.message };
   }

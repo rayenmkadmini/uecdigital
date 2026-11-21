@@ -6,6 +6,10 @@ import { createClient } from "@/lib/supabase/server";
 import { requireProfile, AuthorizationError } from "@/lib/auth/rbac";
 import type { EquipmentCategory, EquipmentCondition, EquipmentStatus, LoanStatus } from "@/lib/data/equipment";
 
+const EquipmentIdSchema = z.string().uuid("ID de matériel invalide");
+const LoanIdSchema = z.string().uuid("ID d'emprunt invalide");
+const EquipmentConditionSchema = z.enum(["NEW", "EXCELLENT", "GOOD", "FAIR", "DAMAGED", "MAINTENANCE"]);
+
 const EquipmentCreateSchema = z.object({
   code: z
     .string()
@@ -16,7 +20,7 @@ const EquipmentCreateSchema = z.object({
   category: z.enum(["PHOTO_VIDEO", "AUDIO", "INFORMATIQUE", "ACCESSOIRES", "SONO", "LOGISTIQUE", "AUTRE"]),
   description: z.string().optional().nullable(),
   serial_number: z.string().optional().nullable(),
-  condition: z.enum(["NEW", "EXCELLENT", "GOOD", "FAIR", "DAMAGED", "MAINTENANCE"]).default("GOOD"),
+  condition: EquipmentConditionSchema.default("GOOD"),
   storage_location: z.string().optional().nullable(),
   purchase_date: z.string().optional().nullable(),
 });
@@ -96,13 +100,22 @@ export async function requestEquipmentLoanAction(
   notes?: string
 ): Promise<ActionResponse> {
   try {
-    const { user, profile } = await requireProfile();
+    const validEqId = EquipmentIdSchema.safeParse(equipmentId);
+    if (!validEqId.success) {
+      return { success: false, message: "ID d'équipement invalide" };
+    }
+
+    if (!expectedReturnDate || isNaN(Date.parse(expectedReturnDate))) {
+      return { success: false, message: "Date de retour prévisionnelle invalide" };
+    }
+
+    const { user } = await requireProfile();
     const supabase = await createClient();
 
     // Verify equipment is available
     const { data: eq, error: eqErr } = await (supabase.from("equipment") as any)
       .select("id, name, status, condition")
-      .eq("id", equipmentId)
+      .eq("id", validEqId.data)
       .single();
 
     if (eqErr || !eq) {
@@ -115,7 +128,7 @@ export async function requestEquipmentLoanAction(
 
     const { data: loan, error: loanErr } = await (supabase.from("equipment_loans") as any)
       .insert({
-        equipment_id: equipmentId,
+        equipment_id: validEqId.data,
         borrower_id: user.id,
         expected_return_date: new Date(expectedReturnDate).toISOString(),
         condition_at_checkout: eq.condition,
@@ -153,6 +166,11 @@ export async function requestEquipmentLoanAction(
 
 export async function approveEquipmentLoanAction(loanId: string): Promise<ActionResponse> {
   try {
+    const validLoanId = LoanIdSchema.safeParse(loanId);
+    if (!validLoanId.success) {
+      return { success: false, message: "ID d'emprunt invalide" };
+    }
+
     const { user, profile } = await requireProfile();
     if (profile.role !== "SUPER_ADMIN") {
       return { success: false, message: "Seul un Super Admin peut valider la sortie de matériel" };
@@ -163,7 +181,7 @@ export async function approveEquipmentLoanAction(loanId: string): Promise<Action
     // Fetch loan
     const { data: loan, error: loanErr } = await (supabase.from("equipment_loans") as any)
       .select("id, equipment_id, status")
-      .eq("id", loanId)
+      .eq("id", validLoanId.data)
       .single();
 
     if (loanErr || !loan) {
@@ -178,7 +196,7 @@ export async function approveEquipmentLoanAction(loanId: string): Promise<Action
         borrow_date: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .eq("id", loanId);
+      .eq("id", validLoanId.data);
 
     // Update equipment status
     await (supabase.from("equipment") as any)
@@ -193,7 +211,7 @@ export async function approveEquipmentLoanAction(loanId: string): Promise<Action
       actor_id: user.id,
       action: "APPROVE_EQUIPMENT_LOAN",
       entity_type: "equipment_loans",
-      entity_id: loanId,
+      entity_id: validLoanId.data,
       details: { equipmentId: loan.equipment_id },
     });
 
@@ -216,6 +234,16 @@ export async function returnEquipmentAction(
   notes?: string
 ): Promise<ActionResponse> {
   try {
+    const validLoanId = LoanIdSchema.safeParse(loanId);
+    if (!validLoanId.success) {
+      return { success: false, message: "ID d'emprunt invalide" };
+    }
+
+    const validCond = EquipmentConditionSchema.safeParse(conditionAtReturn);
+    if (!validCond.success) {
+      return { success: false, message: "État du matériel au retour non reconnu" };
+    }
+
     const { user, profile } = await requireProfile();
     if (profile.role !== "SUPER_ADMIN") {
       return { success: false, message: "Seul un Super Admin peut réceptionner et clore un prêt de matériel" };
@@ -225,7 +253,7 @@ export async function returnEquipmentAction(
 
     const { data: loan, error: loanErr } = await (supabase.from("equipment_loans") as any)
       .select("id, equipment_id")
-      .eq("id", loanId)
+      .eq("id", validLoanId.data)
       .single();
 
     if (loanErr || !loan) {
@@ -237,21 +265,21 @@ export async function returnEquipmentAction(
       .update({
         status: "RETURNED",
         actual_return_date: new Date().toISOString(),
-        condition_at_return: conditionAtReturn,
+        condition_at_return: validCond.data,
         notes: notes || null,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", loanId);
+      .eq("id", validLoanId.data);
 
     // Update equipment
-    const newStatus: EquipmentStatus = conditionAtReturn === "DAMAGED" || conditionAtReturn === "MAINTENANCE"
+    const newStatus: EquipmentStatus = validCond.data === "DAMAGED" || validCond.data === "MAINTENANCE"
       ? "MAINTENANCE"
       : "AVAILABLE";
 
     await (supabase.from("equipment") as any)
       .update({
         status: newStatus,
-        condition: conditionAtReturn,
+        condition: validCond.data,
         updated_at: new Date().toISOString(),
       })
       .eq("id", loan.equipment_id);
@@ -261,8 +289,8 @@ export async function returnEquipmentAction(
       actor_id: user.id,
       action: "RETURN_EQUIPMENT",
       entity_type: "equipment_loans",
-      entity_id: loanId,
-      details: { conditionAtReturn, equipmentId: loan.equipment_id },
+      entity_id: validLoanId.data,
+      details: { conditionAtReturn: validCond.data, equipmentId: loan.equipment_id },
     });
 
     revalidatePath("/dashboard/equipment");

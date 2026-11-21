@@ -23,7 +23,7 @@ export interface ActionResponse<T = any> {
 
 export async function createAnnouncementAction(rawInput: unknown): Promise<ActionResponse> {
   try {
-    const { user, profile } = await requireProfile();
+    const { user, profile, department } = await requireProfile();
     if (profile.role !== "SUPER_ADMIN" && profile.role !== "COORDINATOR") {
       return { success: false, message: "Action réservée aux Coordinateurs et Super Administrateurs" };
     }
@@ -38,6 +38,12 @@ export async function createAnnouncementAction(rawInput: unknown): Promise<Actio
     }
 
     const data = parseResult.data;
+
+    // Coordinators can only post announcements for their own department
+    if (profile.role === "COORDINATOR" && data.department_id && department?.id !== data.department_id) {
+      throw new AuthorizationError("FORBIDDEN: Vous ne pouvez publier une annonce que pour votre propre département.");
+    }
+
     const supabase = await createClient();
 
     const { data: inserted, error } = await (supabase.from("announcements") as any)
@@ -48,7 +54,7 @@ export async function createAnnouncementAction(rawInput: unknown): Promise<Actio
         target_audience: data.target_audience,
         department_id: data.department_id || null,
         priority: data.priority,
-        is_pinned: data.is_pinned,
+        is_pinned: profile.role === "SUPER_ADMIN" ? data.is_pinned : false,
       })
       .select("id, title")
       .single();
@@ -86,7 +92,12 @@ export async function togglePinAnnouncementAction(
   isPinned: boolean
 ): Promise<ActionResponse> {
   try {
-    const { user, profile } = await requireProfile();
+    const validId = z.string().uuid("ID d'annonce invalide").safeParse(announcementId);
+    if (!validId.success) {
+      return { success: false, message: "ID d'annonce invalide" };
+    }
+
+    const { profile } = await requireProfile();
     if (profile.role !== "SUPER_ADMIN") {
       return { success: false, message: "Action réservée aux Super Administrateurs" };
     }
@@ -94,8 +105,8 @@ export async function togglePinAnnouncementAction(
     const supabase = await createClient();
 
     await (supabase.from("announcements") as any)
-      .update({ is_pinned: isPinned, updated_at: new Date().toISOString() })
-      .eq("id", announcementId);
+      .update({ is_pinned: Boolean(isPinned), updated_at: new Date().toISOString() })
+      .eq("id", validId.data);
 
     revalidatePath("/dashboard/announcements");
     return { success: true, message: isPinned ? "Annonce épinglée en tête" : "Épinglage retiré" };
