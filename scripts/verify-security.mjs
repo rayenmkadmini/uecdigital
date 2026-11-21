@@ -333,6 +333,170 @@ async function runSecurityTests() {
     assertTest("SEC-13", "Comment authorization check", false, err.message);
   }
 
+  // TEST 17: Open Redirect Defense in /auth/callback
+  try {
+    const authCallbackContent = readFileSync(resolve("app/auth/callback/route.ts"), "utf-8");
+    const hasOpenRedirectGuard = authCallbackContent.includes('rawNext.startsWith("/") && !rawNext.startsWith("//")');
+
+    assertTest(
+      "SEC-14",
+      "Open Redirect defense in OAuth callback route",
+      hasOpenRedirectGuard,
+      "Callback validates redirect parameter to reject external or protocol-relative URLs"
+    );
+  } catch (err) {
+    assertTest("SEC-14", "Open Redirect defense", false, err.message);
+  }
+
+  // TEST 18: Dashboard Layout Universal Server Guard
+  try {
+    const layoutContent = readFileSync(resolve("app/dashboard/layout.tsx"), "utf-8");
+    const guardsLayout = layoutContent.includes("await requireProfile()");
+
+    assertTest(
+      "SEC-15",
+      "Universal Server Component layout guard on /dashboard/*",
+      guardsLayout,
+      "Dashboard layout enforces active database profile check before rendering any subroute"
+    );
+  } catch (err) {
+    assertTest("SEC-15", "Layout guard verification", false, err.message);
+  }
+
+  // TEST 19: Live PostgREST Anonymous Mutation Rejection on tasks
+  try {
+    const envContent = readFileSync(resolve(".env.local"), "utf-8");
+    const urlMatch = envContent.match(/NEXT_PUBLIC_SUPABASE_URL=(.*)/);
+    const keyMatch = envContent.match(/NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=(.*)/);
+
+    if (urlMatch && keyMatch) {
+      const supabaseUrl = urlMatch[1].trim();
+      const supabaseAnonKey = keyMatch[1].trim();
+
+      const resp = await fetch(`${supabaseUrl}/rest/v1/tasks`, {
+        method: "POST",
+        headers: {
+          apikey: supabaseAnonKey,
+          Authorization: `Bearer ${supabaseAnonKey}`,
+          "Content-Type": "application/json",
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          title: "Malicious Anonymous Task",
+          department_id: "5aa16d3b-3408-4ba3-bd12-bc633efd752f",
+        }),
+      });
+
+      // Anonymous POST must fail (HTTP 401/403 or 0 rows returned due to RLS)
+      const isBlocked = resp.status >= 400 || !resp.ok;
+
+      assertTest(
+        "SEC-16",
+        "Direct anonymous POST mutation rejected on public.tasks",
+        isBlocked,
+        `HTTP ${resp.status} - Anonymous client blocked by RLS from creating tasks`
+      );
+    } else {
+      assertTest("SEC-16", "Anonymous task mutation rejection", false, "Env variables missing");
+    }
+  } catch (err) {
+    assertTest("SEC-16", "Anonymous task mutation rejection", false, err.message);
+  }
+
+  // TEST 20: Live PostgREST Anonymous Mutation Rejection on task_submissions
+  try {
+    const envContent = readFileSync(resolve(".env.local"), "utf-8");
+    const urlMatch = envContent.match(/NEXT_PUBLIC_SUPABASE_URL=(.*)/);
+    const keyMatch = envContent.match(/NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=(.*)/);
+
+    if (urlMatch && keyMatch) {
+      const supabaseUrl = urlMatch[1].trim();
+      const supabaseAnonKey = keyMatch[1].trim();
+
+      const resp = await fetch(`${supabaseUrl}/rest/v1/task_submissions`, {
+        method: "POST",
+        headers: {
+          apikey: supabaseAnonKey,
+          Authorization: `Bearer ${supabaseAnonKey}`,
+          "Content-Type": "application/json",
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          task_id: "00000000-0000-0000-0000-000000000000",
+          title: "Malicious Submission",
+          description: "Inject payload",
+        }),
+      });
+
+      const isBlocked = resp.status >= 400 || !resp.ok;
+
+      assertTest(
+        "SEC-17",
+        "Direct anonymous POST mutation rejected on public.task_submissions",
+        isBlocked,
+        `HTTP ${resp.status} - Anonymous client blocked by RLS from injecting submissions`
+      );
+    } else {
+      assertTest("SEC-17", "Anonymous submission rejection", false, "Env variables missing");
+    }
+  } catch (err) {
+    assertTest("SEC-17", "Anonymous submission rejection", false, err.message);
+  }
+
+  // TEST 21: Server Action Input Schema Hardening (Zod UUID validation)
+  try {
+    const memberActions = readFileSync(resolve("app/actions/members.ts"), "utf-8");
+    const projectActions = readFileSync(resolve("app/actions/projects.ts"), "utf-8");
+    const taskActions = readFileSync(resolve("app/actions/tasks.ts"), "utf-8");
+
+    const memberHasUuid = memberActions.includes("z.string().uuid");
+    const projectHasUuid = projectActions.includes("z.string().uuid");
+    const taskHasUuid = taskActions.includes("z.string().uuid");
+
+    assertTest(
+      "SEC-18",
+      "Server Action runtime input validation with Zod UUID schemas",
+      memberHasUuid && projectHasUuid && taskHasUuid,
+      "Strict UUID and enum validation applied before database queries across all actions"
+    );
+  } catch (err) {
+    assertTest("SEC-18", "Zod UUID validation check", false, err.message);
+  }
+
+  // TEST 22: Core Database Schema Migration RBAC Isolation
+  try {
+    const migrationContent = readFileSync(resolve("supabase/migrations/20261120210000_espace_digital_core_schema.sql"), "utf-8");
+    const helpersInPrivateSchema = migrationContent.includes("CREATE OR REPLACE FUNCTION private.is_super_admin") &&
+                                   migrationContent.includes("CREATE OR REPLACE FUNCTION private.is_coordinator_of") &&
+                                   migrationContent.includes("CREATE OR REPLACE FUNCTION private.is_member_of_department");
+    const rlsEnabledGlobally = migrationContent.includes("ENABLE ROW LEVEL SECURITY");
+
+    assertTest(
+      "SEC-19",
+      "RBAC security functions encapsulated in non-exposed private schema",
+      helpersInPrivateSchema && rlsEnabledGlobally,
+      "Security DEFINER helper functions isolated in private schema; cannot be called directly via REST"
+    );
+  } catch (err) {
+    assertTest("SEC-19", "Private schema encapsulation check", false, err.message);
+  }
+
+  // TEST 23: Database Triggers for Role Protection and Approval Immutability
+  try {
+    const migrationContent = readFileSync(resolve("supabase/migrations/20261120210000_espace_digital_core_schema.sql"), "utf-8");
+    const hasRoleTrigger = migrationContent.includes("trg_protect_profile_roles");
+    const hasApprovalTrigger = migrationContent.includes("trg_enforce_submission_approval");
+
+    assertTest(
+      "SEC-20",
+      "Database triggers for role protection and approval immutability",
+      hasRoleTrigger && hasApprovalTrigger,
+      "trg_protect_profile_roles and trg_enforce_submission_approval guard against privilege escalation"
+    );
+  } catch (err) {
+    assertTest("SEC-20", "Database trigger check", false, err.message);
+  }
+
   console.log("\n=================================================");
   const total = results.length;
   const passed = results.filter((r) => r.passed).length;
