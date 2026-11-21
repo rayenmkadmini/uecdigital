@@ -4,8 +4,8 @@
 **Project:** UEC — Espace Digital  
 **Supabase Project:** `aigsdarfiplwmzqtqlxh` (PostgreSQL 17.12)  
 **Branch:** `feature/uec-espace-digital`  
-**Latest Commit:** `3be2c90`  
-**Status:** **READY FOR APPROVAL** (Awaiting explicit user confirmation before applying SQL to database)
+**Latest Commit:** `c5daf64`  
+**Status:** **READY FOR EXPLICIT APPROVAL** (Awaiting explicit user confirmation before applying SQL to database)
 
 ---
 
@@ -34,14 +34,56 @@ An exhaustive catalog search on `pg_policies` identified exactly 5 affected poli
 | `public.projects` | `projects_select` | `SELECT` | `pm.project_id = pm.id` | `pm.project_id = projects.id` |
 | `public.tasks` | `tasks_select` | `SELECT` | `ta.task_id = ta.id` | `ta.task_id = tasks.id` |
 | `public.tasks` | `tasks_update` | `UPDATE` | `ta.task_id = ta.id` | `ta.task_id = tasks.id` |
-| `public.task_submissions` | `submissions_insert` | `INSERT` | `ta.task_id = ta.task_id` | `ta.task_id = task_submissions.task_id` |
+| `public.task_submissions` | `submissions_insert` | `INSERT` | `ta.task_id = ta.task_id` | `ta.task_id = task_submissions.task_id` (Narrowed) |
 | `public.meetings` | `meetings_select` | `SELECT` | `ma.meeting_id = ma.id` | `ma.meeting_id = meetings.id` |
 
 All other 43 policies in the database already use fully qualified identifiers or single-table predicates (e.g. `t.id = approval_history.task_id`, `p.id = project_members.project_id`) and are intact.
 
 ---
 
-## 3. Proposed Minimal & Reversible SQL Patch
+## 3. Deep-Dive Security Reviews (Pre-Execution Gate)
+
+### 3.1 Task Update Restrictions & Column-Level Privilege Analysis
+- **Current Architecture:**
+  - Row-Level Security (`tasks_update`) authorizes WHICH rows can be updated, but PostgreSQL RLS evaluates at row granularity and does NOT inherently restrict WHICH columns may be updated.
+  - In `app/actions/tasks.ts`, `updateTaskStatusAction` enforces strict application-level restrictions:
+    1. Members can ONLY update `status` between `'TODO'` and `'IN_PROGRESS'`.
+    2. Members CANNOT modify tasks in locked/review statuses (`COORDINATOR_REVIEW`, `SUPER_ADMIN_APPROVAL`, `APPROVED`, `DONE`, `CANCELLED`).
+    3. Final approval (`status = 'APPROVED'`) is rejected unless caller is `SUPER_ADMIN`.
+    4. Sensitive columns (`department_id`, `project_id`, `created_by`, `coordinator_id`, `priority`, `deadline`) are never updated by `updateTaskStatusAction`.
+- **Database Trigger Defense-in-Depth:**
+  - The database currently has `trg_enforce_task_approval`, which enforces that ONLY Super Admin can set `status = 'APPROVED'`.
+  - To prevent direct PostgREST API bypasses where a malicious member with update permissions on their row might attempt to modify administrative fields (`department_id`, `project_id`, `created_by`, `coordinator_id`, `priority`), a complementary trigger `trg_enforce_task_member_immutability` is formulated below as an optional hardening patch.
+
+### 3.2 Submission Authorization Narrowing
+- **Business Rule:**
+  - Assigned members may submit deliverables for their assigned tasks (`submitted_by = auth.uid()` AND user is in `task_assignees`).
+  - Coordinators must NOT submit deliverables on behalf of members unless this is an explicitly approved business rule.
+  - Super Admin permissions remain consistent with existing application workflow (`private.is_super_admin(auth.uid())`).
+  - `submitted_by` must always match `auth.uid()`.
+- **Policy Definition:**
+  The corrected `submissions_insert` policy removes coordinator bypass and strictly restricts INSERTs to assigned members and Super Admin:
+  ```sql
+  WITH CHECK (
+    submitted_by = auth.uid() AND (
+      EXISTS (
+        SELECT 1 FROM public.task_assignees ta
+        WHERE ta.task_id = task_submissions.task_id AND ta.user_id = auth.uid()
+      ) OR
+      private.is_super_admin(auth.uid())
+    )
+  )
+  ```
+
+### 3.3 Interacting Policies & Recursion Review
+- `project_members.project_members_select`: Has `qual = true`. Querying `project_members` inside `projects_select` does NOT trigger recursion.
+- `task_assignees.task_assignees_select`: Has `qual = true`. Querying `task_assignees` inside `tasks_select`, `tasks_update`, and `submissions_insert` does NOT trigger recursion.
+- `meeting_attendees.meeting_attendees_select`: Has `qual = true`. Querying `meeting_attendees` inside `meetings_select` does NOT trigger recursion.
+- Subquery execution is fully supported by existing indexes (`tasks_dept_idx`, `tasks_project_idx`, `task_assignees_task_idx`, `task_assignees_user_idx`).
+
+---
+
+## 4. Proposed Minimal & Reversible SQL Patch (RLS Correction)
 
 This patch strictly corrects column qualifications without altering schema structure, data types, or existing data:
 
@@ -100,7 +142,9 @@ WITH CHECK (
   )
 );
 
--- 4. Correct submissions_insert
+-- 4. Correct & Narrow submissions_insert
+-- Strictly restricted to: assigned members (submitted_by = auth.uid()) and Super Admin.
+-- Coordinators cannot insert deliverables on behalf of members unless they are assigned members.
 DROP POLICY IF EXISTS "submissions_insert" ON public.task_submissions;
 CREATE POLICY "submissions_insert" ON public.task_submissions
 FOR INSERT TO authenticated
@@ -110,11 +154,7 @@ WITH CHECK (
       SELECT 1 FROM public.task_assignees ta
       WHERE ta.task_id = task_submissions.task_id AND ta.user_id = auth.uid()
     ) OR
-    private.is_super_admin(auth.uid()) OR
-    EXISTS (
-      SELECT 1 FROM public.tasks t
-      WHERE t.id = task_submissions.task_id AND private.is_coordinator_of(t.department_id, auth.uid())
-    )
+    private.is_super_admin(auth.uid())
   )
 );
 
@@ -137,9 +177,62 @@ COMMIT;
 
 ---
 
-## 4. Rollback SQL (Emergency Reversibility)
+## 5. Supplementary Column-Level Defense Trigger (Optional Hardening)
 
-If required, the exact previous live definitions can be restored immediately:
+To enforce column immutability directly at the database layer (preventing direct PostgREST attacks), this trigger can be deployed alongside the RLS patch:
+
+```sql
+-- Optional Defense-in-Depth Trigger for Column-Level Task Protection
+CREATE OR REPLACE FUNCTION private.enforce_task_member_immutability()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  -- Super Admin and Department Coordinator have full management authority
+  IF private.is_super_admin(auth.uid()) OR private.is_coordinator_of(OLD.department_id, auth.uid()) THEN
+    RETURN NEW;
+  END IF;
+
+  -- For assigned members:
+  -- 1. Administrative metadata is strictly immutable
+  IF NEW.department_id IS DISTINCT FROM OLD.department_id OR
+     NEW.project_id IS DISTINCT FROM OLD.project_id OR
+     NEW.created_by IS DISTINCT FROM OLD.created_by OR
+     NEW.coordinator_id IS DISTINCT FROM OLD.coordinator_id OR
+     NEW.priority IS DISTINCT FROM OLD.priority OR
+     NEW.deadline IS DISTINCT FROM OLD.deadline OR
+     NEW.start_date IS DISTINCT FROM OLD.start_date THEN
+    RAISE EXCEPTION 'FORBIDDEN: Seuls le coordinateur ou le Super Admin peuvent modifier les paramètres administratifs de la tâche.';
+  END IF;
+
+  -- 2. State transition restrictions
+  IF OLD.status IN ('COORDINATOR_REVIEW', 'SUPER_ADMIN_APPROVAL', 'APPROVED', 'DONE', 'CANCELLED') THEN
+    RAISE EXCEPTION 'FORBIDDEN: Impossible de modifier une tâche en cours de revue ou finalisée (statut actuel: %).', OLD.status;
+  END IF;
+
+  -- 3. Member status transition limited to TODO <-> IN_PROGRESS
+  IF NEW.status IS DISTINCT FROM OLD.status AND NEW.status NOT IN ('TODO', 'IN_PROGRESS') THEN
+    RAISE EXCEPTION 'FORBIDDEN: Les membres peuvent uniquement alterner entre TODO et IN_PROGRESS. Les livrables doivent être soumis via le workflow de dépôt.';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_enforce_task_member_immutability ON public.tasks;
+CREATE TRIGGER trg_enforce_task_member_immutability
+BEFORE UPDATE ON public.tasks
+FOR EACH ROW
+EXECUTE FUNCTION private.enforce_task_member_immutability();
+```
+
+---
+
+## 6. Rollback SQL (Emergency Reversibility)
+
+If required, the exact previous live definitions stored in `pg_policies` can be restored immediately:
 
 ```sql
 BEGIN;
@@ -198,11 +291,12 @@ COMMIT;
 
 ---
 
-## 5. Security Impact Analysis
+## 7. Security Impact Analysis
 
 - **Department Isolation:** Strictly maintained. Unassigned members in Department A cannot see Department B's projects, tasks, or meetings.
 - **Role Hierarchy:**
   - `SUPER_ADMIN`: Retains 100% bypass authority across all 5 tables via `private.is_super_admin(auth.uid())`.
   - `COORDINATOR`: Retains full management within assigned department via `private.is_coordinator_of(department_id, auth.uid())` and remains blocked from other departments.
   - `MEMBER`: Restores intended visibility for assigned projects, tasks, and meetings, while strictly eliminating the submission cross-injection loophole.
+- **No Impersonation:** `submissions_insert` requires `submitted_by = auth.uid()`. Coordinators cannot submit deliverables pretending to be assigned members.
 - **No Access Broadening:** Zero new permissions are introduced. Only the unintended scoping bug that inverted or disabled policy expressions is resolved.

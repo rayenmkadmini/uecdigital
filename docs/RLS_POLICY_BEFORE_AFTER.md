@@ -2,7 +2,8 @@
 ## Detailed Policy Definition Comparison & Column Scoping Analysis
 
 **Supabase Target:** `aigsdarfiplwmzqtqlxh` (PostgreSQL 17.12)  
-**Document Ref:** Phase 2.2 Schema Hardening
+**Document Ref:** Phase 2.2 Schema Hardening  
+**Status:** READY FOR EXPLICIT APPROVAL
 
 ---
 
@@ -79,7 +80,7 @@ USING (
 
 ---
 
-### 3. `public.tasks` — `tasks_update`
+### 3. `public.tasks` — `tasks_update` & Column-Level Security
 
 #### Live Catalog Definition (BEFORE)
 ```sql
@@ -121,6 +122,11 @@ WITH CHECK (
 );
 ```
 
+#### Column-Level Security Evaluation
+- PostgreSQL RLS policies evaluate row access, not column modifications.
+- At application level, Server Action `updateTaskStatusAction` (`app/actions/tasks.ts`) restricts members strictly to `{ status: 'TODO' | 'IN_PROGRESS' }` and rejects updates if the task is in any review or locked state.
+- For defense-in-depth against direct REST API tampering, a PostgreSQL `BEFORE UPDATE` trigger (`private.enforce_task_member_immutability`) is proposed to make `department_id`, `project_id`, `created_by`, `coordinator_id`, and `priority` immutable for non-coordinators/non-admins.
+
 ---
 
 ### 4. `public.task_submissions` — `submissions_insert`
@@ -142,7 +148,7 @@ WITH CHECK (
 Because `ta.task_id = ta.task_id` is always true, the check only asks: *"Does `auth.uid()` have any task assigned anywhere in the database?"*
 **Security Vulnerability:** A member in Department A assigned to Task 1 can insert a fake or unauthorized submission into Task 99 in Department B!
 
-#### Corrected Definition (AFTER)
+#### Corrected & Narrowed Definition (AFTER)
 ```sql
 DROP POLICY IF EXISTS "submissions_insert" ON public.task_submissions;
 CREATE POLICY "submissions_insert" ON public.task_submissions
@@ -153,14 +159,16 @@ WITH CHECK (
       SELECT 1 FROM public.task_assignees ta
       WHERE ta.task_id = task_submissions.task_id AND ta.user_id = auth.uid()
     ) OR
-    private.is_super_admin(auth.uid()) OR
-    EXISTS (
-      SELECT 1 FROM public.tasks t
-      WHERE t.id = task_submissions.task_id AND private.is_coordinator_of(t.department_id, auth.uid())
-    )
+    private.is_super_admin(auth.uid())
   )
 );
 ```
+
+#### Business Rule Validation
+1. **Assigned Members Only:** A member can ONLY submit deliverables for tasks where an explicit assignment exists in `task_assignees` for `task_submissions.task_id`.
+2. **Coordinators Excluded From Submitting On Behalf of Members:** Coordinators cannot submit deliverables for a task unless they themselves are an assigned member (`task_assignees`) or Super Admin.
+3. **No Impersonation:** `submitted_by = auth.uid()` is strictly mandatory.
+4. **Super Admin Parity:** Super Admins can submit or ingest deliverables system-wide.
 
 ---
 
