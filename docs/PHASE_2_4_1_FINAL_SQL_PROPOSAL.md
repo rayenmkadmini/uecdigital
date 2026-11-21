@@ -104,9 +104,9 @@ BEGIN
       RAISE EXCEPTION 'FORBIDDEN: Impossible de modifier une tâche validée ou sous revue du Super Admin (statut actuel: %).', OLD.status;
     END IF;
 
-    -- D. Coordinators cannot approve tasks directly (also enforced by trg_enforce_task_approval)
-    IF NEW.status = 'APPROVED' AND (OLD.status IS NULL OR OLD.status <> 'APPROVED') THEN
-      RAISE EXCEPTION 'APPROVAL_VIOLATION: Seul le Super Admin est habilité à approuver définitivement une tâche.';
+    -- D. Coordinators cannot approve or close tasks directly (Reserved for Super Admin)
+    IF NEW.status IN ('APPROVED', 'DONE') AND (OLD.status IS NULL OR OLD.status NOT IN ('APPROVED', 'DONE')) THEN
+      RAISE EXCEPTION 'APPROVAL_VIOLATION: Seul le Super Admin est habilité à approuver ou clôturer définitivement une tâche (statut demandé: %).', NEW.status;
     END IF;
 
     RETURN NEW;
@@ -161,6 +161,10 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+
+-- Secure Function Permissions
+REVOKE EXECUTE ON FUNCTION private.enforce_task_member_immutability() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION private.enforce_task_member_immutability() TO authenticated, service_role, postgres;
 
 -- Drop trigger if already exists for idempotency
 DROP TRIGGER IF EXISTS trg_enforce_task_member_immutability ON public.tasks;
