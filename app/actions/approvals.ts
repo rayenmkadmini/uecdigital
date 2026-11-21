@@ -1,6 +1,6 @@
 "use server";
 
-import { assertActionSuperAdmin, assertActionRole } from "@/lib/auth/rbac";
+import { assertActionSuperAdmin, assertActionRole, AuthorizationError } from "@/lib/auth/rbac";
 import { createClient } from "@/lib/supabase/server";
 
 export interface ApprovalActionResult {
@@ -102,12 +102,35 @@ export async function submitCoordinatorReview(
   notes: string
 ): Promise<ApprovalActionResult> {
   // 1. Role verification: Only COORDINATOR or SUPER_ADMIN
-  const { user, profile } = await assertActionRole(["COORDINATOR", "SUPER_ADMIN"]);
+  const { user, profile, department } = await assertActionRole(["COORDINATOR", "SUPER_ADMIN"]);
+
+  if (!submissionId || typeof submissionId !== "string") {
+    return { success: false, message: "INVALID_INPUT: ID de soumission manquant" };
+  }
+
+  if (action !== "SUBMIT_TO_SUPER_ADMIN" && action !== "REQUEST_REVISION") {
+    return { success: false, message: "INVALID_ACTION: Action de revue non valide" };
+  }
+
+  if (!notes || notes.trim().length === 0) {
+    return { success: false, message: "INVALID_INPUT: Les notes de revue sont obligatoires" };
+  }
 
   const supabase = await createClient();
 
+  // 2. Fetch submission with parent task to verify lock status and department ownership
   const { data: submission, error: fetchErr } = await (supabase.from("task_submissions") as any)
-    .select("id, task_id, status")
+    .select(`
+      id,
+      task_id,
+      status,
+      is_locked,
+      tasks:task_id (
+        id,
+        department_id,
+        status
+      )
+    `)
     .eq("id", submissionId)
     .single();
 
@@ -116,6 +139,25 @@ export async function submitCoordinatorReview(
       success: false,
       message: "Soumission introuvable",
     };
+  }
+
+  // Prevent modifying locked/approved submissions
+  if (submission.is_locked || submission.status === "APPROVED") {
+    return {
+      success: false,
+      message: "FORBIDDEN: Ce livrable est déjà verrouillé et validé définitivement.",
+    };
+  }
+
+  // Cross-department check: Coordinators can ONLY review submissions from their own department
+  const isSuperAdmin = profile.role === "SUPER_ADMIN";
+  const taskDeptId = submission.tasks?.department_id;
+
+  if (!isSuperAdmin && (!department || department.id !== taskDeptId)) {
+    throw new AuthorizationError(
+      "FORBIDDEN: Vous n'avez pas l'autorité pour réviser un livrable d'un autre pôle.",
+      403
+    );
   }
 
   const typedSubmission = submission as {

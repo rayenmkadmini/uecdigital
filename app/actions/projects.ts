@@ -21,6 +21,18 @@ const ProjectCreateSchema = z.object({
   deadline: z.string().optional().nullable(),
 });
 
+const ProjectUpdateSchema = z.object({
+  title: z.string().min(3, "Le titre doit comporter au moins 3 caractères").max(150).optional(),
+  description: z.string().optional().nullable(),
+  priority: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
+  status: z.enum(["PLANNING", "ACTIVE", "ON_HOLD", "IN_REVIEW", "COMPLETED", "CANCELLED"]).optional(),
+  start_date: z.string().optional().nullable(),
+  deadline: z.string().optional().nullable(),
+  progress: z.number().min(0).max(100).optional(),
+});
+
+const ProjectMemberRoleSchema = z.enum(["LEAD", "CONTRIBUTOR", "VIEWER"]);
+
 export interface ActionResponse<T = any> {
   success: boolean;
   message: string;
@@ -135,9 +147,24 @@ export async function createProjectAction(rawInput: unknown): Promise<ActionResp
  */
 export async function updateProjectAction(
   projectId: string,
-  rawInput: Partial<z.infer<typeof ProjectCreateSchema>> & { progress?: number }
+  rawInput: unknown
 ): Promise<ActionResponse> {
   try {
+    const validId = z.string().uuid("ID de projet invalide").safeParse(projectId);
+    if (!validId.success) {
+      return { success: false, message: "ID de projet invalide" };
+    }
+
+    const parsed = ProjectUpdateSchema.safeParse(rawInput);
+    if (!parsed.success) {
+      return {
+        success: false,
+        message: "Erreur de validation des champs du projet",
+        errors: parsed.error.flatten().fieldErrors,
+      };
+    }
+
+    const data = parsed.data;
     const { user, profile, department } = await requireProfile();
 
     const supabase = await createClient();
@@ -161,13 +188,13 @@ export async function updateProjectAction(
     }
 
     const updatePayload: Record<string, any> = {};
-    if (rawInput.title) updatePayload.title = rawInput.title;
-    if (rawInput.description !== undefined) updatePayload.description = rawInput.description;
-    if (rawInput.status) updatePayload.status = rawInput.status;
-    if (rawInput.priority) updatePayload.priority = rawInput.priority;
-    if (rawInput.start_date !== undefined) updatePayload.start_date = rawInput.start_date;
-    if (rawInput.deadline !== undefined) updatePayload.deadline = rawInput.deadline;
-    if (rawInput.progress !== undefined) updatePayload.progress = Math.min(100, Math.max(0, rawInput.progress));
+    if (data.title) updatePayload.title = data.title;
+    if (data.description !== undefined) updatePayload.description = data.description;
+    if (data.status) updatePayload.status = data.status;
+    if (data.priority) updatePayload.priority = data.priority;
+    if (data.start_date !== undefined) updatePayload.start_date = data.start_date;
+    if (data.deadline !== undefined) updatePayload.deadline = data.deadline;
+    if (data.progress !== undefined) updatePayload.progress = data.progress;
 
     const { error: updateErr } = await (supabase.from("projects") as any)
       .update(updatePayload)
@@ -201,6 +228,14 @@ export async function assignProjectMemberAction(
   roleInProject = "CONTRIBUTOR"
 ): Promise<ActionResponse> {
   try {
+    const validProj = z.string().uuid("ID de projet invalide").safeParse(projectId);
+    const validUser = z.string().uuid("ID d'utilisateur invalide").safeParse(userId);
+    const validRole = ProjectMemberRoleSchema.safeParse(roleInProject);
+
+    if (!validProj.success || !validUser.success || !validRole.success) {
+      return { success: false, message: "Paramètres d'assignation de projet invalides." };
+    }
+
     const { profile, department } = await requireProfile();
 
     const supabase = await createClient();
@@ -222,7 +257,7 @@ export async function assignProjectMemberAction(
     const { error } = await (supabase.from("project_members") as any).insert({
       project_id: projectId,
       user_id: userId,
-      role_in_project: roleInProject,
+      role_in_project: validRole.data,
     });
 
     if (error) {

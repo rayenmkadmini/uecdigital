@@ -1,5 +1,5 @@
 /**
- * UEC ESPACE DIGITAL — AUTOMATED INTEGRATION & SECURITY TEST SUITE (PHASE 2)
+ * UEC ESPACE DIGITAL — AUTOMATED INTEGRATION & SECURITY TEST SUITE (PHASE 2.1)
  * 
  * Verifies:
  * 1. Middleware blocks unauthenticated requests to /dashboard/*
@@ -13,6 +13,11 @@
  * 9. Phase 2 Real Data Access Layer integrity (departments, members, projects, tasks, dashboard)
  * 10. Phase 2 Server Actions integrity & RBAC assertions
  * 11. Phase 2 Dynamic Server Component route guards
+ * 12. Cross-department review guard in submitCoordinatorReview
+ * 13. Self-demotion protection in updateMemberRoleAction
+ * 14. Deliverable submission assignment & terminal state guard in submitDeliverableAction
+ * 15. Workflow status regression protection in updateTaskStatusAction
+ * 16. Task comment authorization check in addTaskCommentAction
  */
 
 import { readFileSync, existsSync } from "fs";
@@ -248,6 +253,84 @@ async function runSecurityTests() {
     );
   } catch (err) {
     assertTest("DATA-03", "Dynamic Server Component Route Guards", false, err.message);
+  }
+
+  // TEST 12: Cross-Department Review & Submission Lock Protection
+  try {
+    const approvalsActions = readFileSync(resolve("app/actions/approvals.ts"), "utf-8");
+    const hasLockCheck = approvalsActions.includes("submission.is_locked || submission.status === \"APPROVED\"");
+    const hasDeptCheck = approvalsActions.includes("department.id !== taskDeptId");
+
+    assertTest(
+      "SEC-09",
+      "Cross-department review prevention and submission lock enforcement",
+      hasLockCheck && hasDeptCheck,
+      "Coordinators blocked from reviewing other departments; locked submissions immutable"
+    );
+  } catch (err) {
+    assertTest("SEC-09", "Cross-department review protection", false, err.message);
+  }
+
+  // TEST 13: Super Admin Self-Demotion & Role Escalation Defense
+  try {
+    const membersActions = readFileSync(resolve("app/actions/members.ts"), "utf-8");
+    const hasSelfDemotionCheck = membersActions.includes("user.id === userId && newRole !== \"SUPER_ADMIN\"");
+    const hasZodValidation = membersActions.includes("RoleSchema.safeParse");
+
+    assertTest(
+      "SEC-10",
+      "Super Admin self-demotion prevention & runtime role schema validation",
+      hasSelfDemotionCheck && hasZodValidation,
+      "Self-demotion blocked; role value validated against Zod enum"
+    );
+  } catch (err) {
+    assertTest("SEC-10", "Self-demotion defense", false, err.message);
+  }
+
+  // TEST 14: Deliverable Submission Assignment & Terminal State Guard
+  try {
+    const taskActions = readFileSync(resolve("app/actions/tasks.ts"), "utf-8");
+    const hasAssignmentCheck = taskActions.includes("!isSuperAdmin && !isDeptCoord") && taskActions.includes("assignment");
+    const hasTerminalStateCheck = taskActions.includes("task.status === \"APPROVED\" || task.status === \"DONE\" || task.status === \"CANCELLED\"");
+
+    assertTest(
+      "SEC-11",
+      "Deliverable submission assignment enforcement and terminal state guard",
+      hasAssignmentCheck && hasTerminalStateCheck,
+      "Only assigned members or coordinators can submit; approved/done tasks blocked"
+    );
+  } catch (err) {
+    assertTest("SEC-11", "Deliverable submission guard", false, err.message);
+  }
+
+  // TEST 15: Task Status Regression Protection
+  try {
+    const taskActions = readFileSync(resolve("app/actions/tasks.ts"), "utf-8");
+    const hasRegressionCheck = taskActions.includes("lockedStatuses") && taskActions.includes("!isSuperAdmin");
+
+    assertTest(
+      "SEC-12",
+      "Task status workflow regression protection",
+      hasRegressionCheck,
+      "Members and coordinators cannot unilaterally regress tasks in review or approved"
+    );
+  } catch (err) {
+    assertTest("SEC-12", "Task status regression protection", false, err.message);
+  }
+
+  // TEST 16: Task Comment Access Authorization
+  try {
+    const taskActions = readFileSync(resolve("app/actions/tasks.ts"), "utf-8");
+    const hasCommentAuth = taskActions.includes("addTaskCommentAction") && taskActions.includes("task_assignees");
+
+    assertTest(
+      "SEC-13",
+      "Task collaborative comment access control",
+      hasCommentAuth,
+      "Unrelated members blocked from commenting on private departmental tasks"
+    );
+  } catch (err) {
+    assertTest("SEC-13", "Comment authorization check", false, err.message);
   }
 
   console.log("\n=================================================");

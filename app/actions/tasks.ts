@@ -148,6 +148,14 @@ export async function updateTaskStatusAction(
     const isSuperAdmin = profile.role === "SUPER_ADMIN";
     const isDeptCoord = profile.role === "COORDINATOR" && department?.id === task.department_id;
 
+    // Prevent regressing approved, locked or review tasks by non-super-admin
+    const lockedStatuses: TaskStatus[] = ["COORDINATOR_REVIEW", "SUPER_ADMIN_APPROVAL", "APPROVED", "DONE", "CANCELLED"];
+    if (lockedStatuses.includes(task.status as TaskStatus) && !isSuperAdmin) {
+      throw new AuthorizationError(
+        `FORBIDDEN: Cette tâche est en phase "${task.status}" et ne peut pas être modifiée unilatéralement.`
+      );
+    }
+
     if (!isSuperAdmin && !isDeptCoord) {
       // Check if user is an assigned member
       const { data: assignment } = await (supabase.from("task_assignees") as any)
@@ -199,7 +207,7 @@ export async function submitDeliverableAction(
   fileUrls: string[] = []
 ): Promise<ActionResponse> {
   try {
-    const { user } = await requireProfile();
+    const { user, profile, department } = await requireProfile();
 
     if (!taskId || !title || !description) {
       return { success: false, message: "Tous les champs obligatoires doivent être renseignés." };
@@ -207,13 +215,37 @@ export async function submitDeliverableAction(
 
     const supabase = await createClient();
 
-    // Verify task exists and user is assigned or coordinator
+    // Verify task exists and caller has authority (assigned, coordinator of dept, or super admin)
     const { data: task } = await (supabase.from("tasks") as any)
-      .select("id, department_id, title")
+      .select("id, department_id, title, status")
       .eq("id", taskId)
       .single();
 
     if (!task) return { success: false, message: "Tâche introuvable" };
+
+    if (task.status === "APPROVED" || task.status === "DONE" || task.status === "CANCELLED") {
+      return {
+        success: false,
+        message: `FORBIDDEN: Impossible de soumettre un livrable pour une tâche au statut "${task.status}".`,
+      };
+    }
+
+    const isSuperAdmin = profile.role === "SUPER_ADMIN";
+    const isDeptCoord = profile.role === "COORDINATOR" && department?.id === task.department_id;
+
+    if (!isSuperAdmin && !isDeptCoord) {
+      const { data: assignment } = await (supabase.from("task_assignees") as any)
+        .select("id")
+        .eq("task_id", taskId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (!assignment) {
+        throw new AuthorizationError(
+          "FORBIDDEN: Vous n'êtes pas assigné à cette tâche pour y déposer un livrable."
+        );
+      }
+    }
 
     // Get highest version
     const { data: prevSubs } = await (supabase.from("task_submissions") as any)
@@ -274,13 +306,36 @@ export async function submitDeliverableAction(
  */
 export async function addTaskCommentAction(taskId: string, content: string): Promise<ActionResponse> {
   try {
-    const { user } = await requireProfile();
+    const { user, profile, department } = await requireProfile();
 
-    if (!content || content.trim().length === 0) {
+    if (!taskId || !content || content.trim().length === 0) {
       return { success: false, message: "Le commentaire ne peut être vide." };
     }
 
     const supabase = await createClient();
+
+    // Verify task exists and user has access (Super Admin, dept coordinator, or assigned member)
+    const { data: task } = await (supabase.from("tasks") as any)
+      .select("id, department_id")
+      .eq("id", taskId)
+      .single();
+
+    if (!task) return { success: false, message: "Tâche introuvable" };
+
+    const isSuperAdmin = profile.role === "SUPER_ADMIN";
+    const isDeptCoord = profile.role === "COORDINATOR" && department?.id === task.department_id;
+
+    if (!isSuperAdmin && !isDeptCoord) {
+      const { data: assignment } = await (supabase.from("task_assignees") as any)
+        .select("id")
+        .eq("task_id", taskId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (!assignment) {
+        throw new AuthorizationError("FORBIDDEN: Vous n'avez pas accès aux commentaires de cette tâche.");
+      }
+    }
 
     const { error } = await (supabase.from("task_comments") as any).insert({
       task_id: taskId,
