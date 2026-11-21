@@ -4,7 +4,7 @@
 **Project:** UEC — Espace Digital  
 **Supabase Project:** `aigsdarfiplwmzqtqlxh` (PostgreSQL 17.12)  
 **Branch:** `feature/uec-espace-digital`  
-**Latest Commit:** `c5daf64`  
+**Latest Commit:** `07c7b42`  
 **Status:** **READY FOR EXPLICIT APPROVAL** (Awaiting explicit user confirmation before applying SQL to database)
 
 ---
@@ -41,7 +41,7 @@ All other 43 policies in the database already use fully qualified identifiers or
 
 ---
 
-## 3. Deep-Dive Security Reviews (Pre-Execution Gate)
+## 3. Deep-Dive Security & Performance Reviews (Supabase Advisors)
 
 ### 3.1 Task Update Restrictions & Column-Level Privilege Analysis
 - **Current Architecture:**
@@ -57,25 +57,29 @@ All other 43 policies in the database already use fully qualified identifiers or
 
 ### 3.2 Submission Authorization Narrowing
 - **Business Rule:**
-  - Assigned members may submit deliverables for their assigned tasks (`submitted_by = auth.uid()` AND user is in `task_assignees`).
+  - Assigned members may submit deliverables for their assigned tasks (`submitted_by = (select auth.uid())` AND user is in `task_assignees`).
   - Coordinators must NOT submit deliverables on behalf of members unless this is an explicitly approved business rule.
-  - Super Admin permissions remain consistent with existing application workflow (`private.is_super_admin(auth.uid())`).
-  - `submitted_by` must always match `auth.uid()`.
+  - Super Admin permissions remain consistent with existing application workflow (`private.is_super_admin((select auth.uid()))`).
+  - `submitted_by` must always match `(select auth.uid())`.
 - **Policy Definition:**
   The corrected `submissions_insert` policy removes coordinator bypass and strictly restricts INSERTs to assigned members and Super Admin:
   ```sql
   WITH CHECK (
-    submitted_by = auth.uid() AND (
+    submitted_by = (select auth.uid()) AND (
       EXISTS (
         SELECT 1 FROM public.task_assignees ta
-        WHERE ta.task_id = task_submissions.task_id AND ta.user_id = auth.uid()
+        WHERE ta.task_id = task_submissions.task_id AND ta.user_id = (select auth.uid())
       ) OR
-      private.is_super_admin(auth.uid())
+      private.is_super_admin((select auth.uid()))
     )
   )
   ```
 
-### 3.3 Interacting Policies & Recursion Review
+### 3.3 Performance Optimization — Supabase Advisor `auth_rls_initplan`
+Per Supabase Database Advisor rule `0003_auth_rls_initplan`:
+Calling bare `auth.uid()` in RLS expressions causes Postgres to re-evaluate the function per row during table scans. Wrapping calls in `(select auth.uid())` causes the planner to evaluate the expression once per query via an initPlan, significantly improving query performance at scale.
+
+### 3.4 Interacting Policies & Recursion Review
 - `project_members.project_members_select`: Has `qual = true`. Querying `project_members` inside `projects_select` does NOT trigger recursion.
 - `task_assignees.task_assignees_select`: Has `qual = true`. Querying `task_assignees` inside `tasks_select`, `tasks_update`, and `submissions_insert` does NOT trigger recursion.
 - `meeting_attendees.meeting_attendees_select`: Has `qual = true`. Querying `meeting_attendees` inside `meetings_select` does NOT trigger recursion.
@@ -85,7 +89,7 @@ All other 43 policies in the database already use fully qualified identifiers or
 
 ## 4. Proposed Minimal & Reversible SQL Patch (RLS Correction)
 
-This patch strictly corrects column qualifications without altering schema structure, data types, or existing data:
+This patch strictly corrects column qualifications with Supabase initPlan optimization:
 
 ```sql
 -- ==============================================================================
@@ -100,11 +104,11 @@ DROP POLICY IF EXISTS "projects_select" ON public.projects;
 CREATE POLICY "projects_select" ON public.projects
 FOR SELECT TO authenticated
 USING (
-  private.is_super_admin(auth.uid()) OR
-  private.is_coordinator_of(projects.department_id, auth.uid()) OR
+  private.is_super_admin((select auth.uid())) OR
+  private.is_coordinator_of(projects.department_id, (select auth.uid())) OR
   EXISTS (
     SELECT 1 FROM public.project_members pm
-    WHERE pm.project_id = projects.id AND pm.user_id = auth.uid()
+    WHERE pm.project_id = projects.id AND pm.user_id = (select auth.uid())
   )
 );
 
@@ -113,11 +117,11 @@ DROP POLICY IF EXISTS "tasks_select" ON public.tasks;
 CREATE POLICY "tasks_select" ON public.tasks
 FOR SELECT TO authenticated
 USING (
-  private.is_super_admin(auth.uid()) OR
-  private.is_coordinator_of(tasks.department_id, auth.uid()) OR
+  private.is_super_admin((select auth.uid())) OR
+  private.is_coordinator_of(tasks.department_id, (select auth.uid())) OR
   EXISTS (
     SELECT 1 FROM public.task_assignees ta
-    WHERE ta.task_id = tasks.id AND ta.user_id = auth.uid()
+    WHERE ta.task_id = tasks.id AND ta.user_id = (select auth.uid())
   )
 );
 
@@ -126,35 +130,35 @@ DROP POLICY IF EXISTS "tasks_update" ON public.tasks;
 CREATE POLICY "tasks_update" ON public.tasks
 FOR UPDATE TO authenticated
 USING (
-  private.is_super_admin(auth.uid()) OR
-  private.is_coordinator_of(tasks.department_id, auth.uid()) OR
+  private.is_super_admin((select auth.uid())) OR
+  private.is_coordinator_of(tasks.department_id, (select auth.uid())) OR
   EXISTS (
     SELECT 1 FROM public.task_assignees ta
-    WHERE ta.task_id = tasks.id AND ta.user_id = auth.uid()
+    WHERE ta.task_id = tasks.id AND ta.user_id = (select auth.uid())
   )
 )
 WITH CHECK (
-  private.is_super_admin(auth.uid()) OR
-  private.is_coordinator_of(tasks.department_id, auth.uid()) OR
+  private.is_super_admin((select auth.uid())) OR
+  private.is_coordinator_of(tasks.department_id, (select auth.uid())) OR
   EXISTS (
     SELECT 1 FROM public.task_assignees ta
-    WHERE ta.task_id = tasks.id AND ta.user_id = auth.uid()
+    WHERE ta.task_id = tasks.id AND ta.user_id = (select auth.uid())
   )
 );
 
 -- 4. Correct & Narrow submissions_insert
--- Strictly restricted to: assigned members (submitted_by = auth.uid()) and Super Admin.
+-- Strictly restricted to: assigned members (submitted_by = (select auth.uid())) and Super Admin.
 -- Coordinators cannot insert deliverables on behalf of members unless they are assigned members.
 DROP POLICY IF EXISTS "submissions_insert" ON public.task_submissions;
 CREATE POLICY "submissions_insert" ON public.task_submissions
 FOR INSERT TO authenticated
 WITH CHECK (
-  submitted_by = auth.uid() AND (
+  submitted_by = (select auth.uid()) AND (
     EXISTS (
       SELECT 1 FROM public.task_assignees ta
-      WHERE ta.task_id = task_submissions.task_id AND ta.user_id = auth.uid()
+      WHERE ta.task_id = task_submissions.task_id AND ta.user_id = (select auth.uid())
     ) OR
-    private.is_super_admin(auth.uid())
+    private.is_super_admin((select auth.uid()))
   )
 );
 
@@ -163,12 +167,12 @@ DROP POLICY IF EXISTS "meetings_select" ON public.meetings;
 CREATE POLICY "meetings_select" ON public.meetings
 FOR SELECT TO authenticated
 USING (
-  private.is_super_admin(auth.uid()) OR
-  created_by = auth.uid() OR
-  (department_id IS NOT NULL AND private.is_member_of_department(department_id, auth.uid())) OR
+  private.is_super_admin((select auth.uid())) OR
+  created_by = (select auth.uid()) OR
+  (department_id IS NOT NULL AND private.is_member_of_department(department_id, (select auth.uid()))) OR
   EXISTS (
     SELECT 1 FROM public.meeting_attendees ma
-    WHERE ma.meeting_id = meetings.id AND ma.user_id = auth.uid()
+    WHERE ma.meeting_id = meetings.id AND ma.user_id = (select auth.uid())
   )
 );
 
@@ -295,8 +299,9 @@ COMMIT;
 
 - **Department Isolation:** Strictly maintained. Unassigned members in Department A cannot see Department B's projects, tasks, or meetings.
 - **Role Hierarchy:**
-  - `SUPER_ADMIN`: Retains 100% bypass authority across all 5 tables via `private.is_super_admin(auth.uid())`.
-  - `COORDINATOR`: Retains full management within assigned department via `private.is_coordinator_of(department_id, auth.uid())` and remains blocked from other departments.
+  - `SUPER_ADMIN`: Retains 100% bypass authority across all 5 tables via `private.is_super_admin((select auth.uid()))`.
+  - `COORDINATOR`: Retains full management within assigned department via `private.is_coordinator_of(department_id, (select auth.uid()))` and remains blocked from other departments.
   - `MEMBER`: Restores intended visibility for assigned projects, tasks, and meetings, while strictly eliminating the submission cross-injection loophole.
-- **No Impersonation:** `submissions_insert` requires `submitted_by = auth.uid()`. Coordinators cannot submit deliverables pretending to be assigned members.
-- **No Access Broadening:** Zero new permissions are introduced. Only the unintended scoping bug that inverted or disabled policy expressions is resolved.
+- **No Impersonation:** `submissions_insert` requires `submitted_by = (select auth.uid())`. Coordinators cannot submit deliverables pretending to be assigned members.
+- **Performance:** Evaluates `auth.uid()` via initPlan once per query instead of per row.
+- **No Access Broadening:** Zero new permissions are introduced.
