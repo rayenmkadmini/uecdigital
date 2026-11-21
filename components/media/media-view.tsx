@@ -24,11 +24,17 @@ import {
   X,
   Sparkles,
   Layers,
+  Edit2,
+  Trash2,
 } from "lucide-react";
 import type { MediaFileItem, MediaCategory } from "@/lib/data/media";
 import type { DepartmentWithStats } from "@/lib/data/departments";
 import { createClient } from "@/lib/supabase/client";
-import { recordMediaFileAction } from "@/app/actions/media";
+import {
+  recordMediaFileAction,
+  deleteMediaFileAction,
+} from "@/app/actions/media";
+import { MediaEditModal } from "./media-edit-modal";
 
 interface MediaViewProps {
   initialFiles: MediaFileItem[];
@@ -50,9 +56,15 @@ export function MediaView({ initialFiles, departments, userRole }: MediaViewProp
   const [files, setFiles] = useState<MediaFileItem[]>(initialFiles);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
+  const [deptFilter, setDeptFilter] = useState<string>("ALL");
   const [activeTab, setActiveTab] = useState<"grid" | "list">("grid");
+
+  // Modals state
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [editingFile, setEditingFile] = useState<MediaFileItem | null>(null);
+  const [isEditOpen, setIsEditOpen] = useState(false);
   const [previewItem, setPreviewItem] = useState<MediaFileItem | null>(null);
+
   const [isUploading, setIsUploading] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [actionMessage, setActionMessage] = useState<{ text: string; error?: boolean } | null>(null);
@@ -64,9 +76,11 @@ export function MediaView({ initialFiles, departments, userRole }: MediaViewProp
   const [uploadDeptId, setUploadDeptId] = useState("");
 
   const canUpload = Boolean(userRole);
+  const canManage = userRole === "SUPER_ADMIN" || userRole === "COORDINATOR";
 
   const filteredFiles = files.filter((f) => {
     if (categoryFilter !== "ALL" && f.category !== categoryFilter) return false;
+    if (deptFilter !== "ALL" && f.department_id !== deptFilter) return false;
     if (
       search.trim() &&
       !f.title.toLowerCase().includes(search.toLowerCase()) &&
@@ -91,6 +105,21 @@ export function MediaView({ initialFiles, departments, userRole }: MediaViewProp
     navigator.clipboard.writeText(window.location.origin + url);
     setActionMessage({ text: "Lien de téléchargement copié dans le presse-papier" });
     setTimeout(() => setActionMessage(null), 3000);
+  };
+
+  const handleDeleteFile = (fileId: string, title: string) => {
+    if (!confirm(`Supprimer définitivement le fichier "${title}" de la médiathèque ?`)) return;
+
+    startTransition(async () => {
+      const res = await deleteMediaFileAction(fileId);
+      if (res.success) {
+        setFiles((prev) => prev.filter((f) => f.id !== fileId));
+        setActionMessage({ text: "Fichier supprimé avec succès." });
+      } else {
+        setActionMessage({ text: res.message, error: true });
+      }
+      setTimeout(() => setActionMessage(null), 3000);
+    });
   };
 
   const handleUploadSubmit = async (e: React.FormEvent) => {
@@ -154,10 +183,11 @@ export function MediaView({ initialFiles, departments, userRole }: MediaViewProp
           uploader_name: "Moi",
           is_public_within_team: true,
           metadata: {},
+          url: urlData.publicUrl,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-          url: urlData.publicUrl,
         };
+
         setFiles([newMedia, ...files]);
         setUploadFile(null);
         setUploadTitle("");
@@ -165,7 +195,7 @@ export function MediaView({ initialFiles, departments, userRole }: MediaViewProp
         setActionMessage({ text: res.message, error: true });
       }
     } catch (err: any) {
-      setActionMessage({ text: `Erreur d'envoi: ${err.message}`, error: true });
+      setActionMessage({ text: err.message || "Erreur de téléversement", error: true });
     } finally {
       setIsUploading(false);
       setTimeout(() => setActionMessage(null), 4000);
@@ -174,22 +204,29 @@ export function MediaView({ initialFiles, departments, userRole }: MediaViewProp
 
   return (
     <div className="space-y-6">
-      {/* Title & Action */}
+      {/* Title */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
             <FolderArchive size={24} className="text-uec-red" />
-            <span>Médiathèque & Ressources Officielles</span>
+            <span>Médiathèque & Assets Graphiques</span>
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Banque centralisée des chartes graphiques, logos HD, typographies et livrables validés.
+            Banque centralisée des chartes graphiques, photographies, teasers et fichiers officiels ({files.length} fichiers répertoriés).
           </p>
         </div>
 
-        <Button variant="primary" size="sm" onClick={() => setIsUploadOpen(true)}>
-          <UploadCloud size={15} className="mr-1.5" />
-          Importer un Fichier
-        </Button>
+        {canUpload && (
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setIsUploadOpen(true)}
+            className="bg-uec-red hover:bg-uec-red/90 text-white"
+          >
+            <UploadCloud size={16} className="mr-1.5" />
+            Importer un Asset
+          </Button>
+        )}
       </div>
 
       {actionMessage && (
@@ -246,13 +283,13 @@ export function MediaView({ initialFiles, departments, userRole }: MediaViewProp
         <CardContent className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="flex flex-1 items-center gap-2 flex-wrap">
             <div className="relative flex-1 min-w-[220px]">
-              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 rtl:left-auto rtl:right-3" />
               <input
                 type="text"
                 placeholder="Rechercher par titre ou nom de fichier..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full bg-[#111827] text-xs text-white placeholder-slate-500 rounded-lg pl-9 pr-3 py-2 border border-[#1F2937] focus:border-uec-blue focus:outline-none"
+                className="w-full bg-[#111827] text-xs text-white placeholder-slate-500 rounded-lg pl-9 pr-3 py-2 border border-[#1F2937] focus:border-uec-blue focus:outline-none rtl:pl-3 rtl:pr-9"
               />
             </div>
 
@@ -269,6 +306,21 @@ export function MediaView({ initialFiles, departments, userRole }: MediaViewProp
               <option value="DOCUMENT">Documents & Chartes</option>
               <option value="DESIGN_ASSET">Ressources Graphiques</option>
               <option value="AUDIO">Sons & Chants</option>
+              <option value="AUTRE">Divers</option>
+            </select>
+
+            {/* Department Filter */}
+            <select
+              value={deptFilter}
+              onChange={(e) => setDeptFilter(e.target.value)}
+              className="bg-[#111827] text-xs text-white rounded-lg px-3 py-2 border border-[#1F2937] focus:border-uec-blue focus:outline-none"
+            >
+              <option value="ALL">Tous les Pôles</option>
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -354,7 +406,7 @@ export function MediaView({ initialFiles, departments, userRole }: MediaViewProp
                   </div>
 
                   <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-[#1F2937]">
-                    <span className="text-uec-cyan font-medium">
+                    <span className="text-uec-cyan font-medium truncate max-w-[100px]">
                       {CATEGORY_LABELS[file.category]}
                     </span>
                     <div className="flex items-center gap-1">
@@ -375,6 +427,28 @@ export function MediaView({ initialFiles, departments, userRole }: MediaViewProp
                       >
                         <Download size={13} />
                       </a>
+                      {canManage && (
+                        <>
+                          <button
+                            onClick={() => {
+                              setEditingFile(file);
+                              setIsEditOpen(true);
+                            }}
+                            className="p-1 hover:text-white transition-colors"
+                            title="Modifier les métadonnées"
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteFile(file.id, file.title)}
+                            disabled={isPending}
+                            className="p-1 hover:text-rose-400 transition-colors"
+                            title="Supprimer le fichier"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 </CardContent>
@@ -400,38 +474,64 @@ export function MediaView({ initialFiles, departments, userRole }: MediaViewProp
                       <FileText size={20} className="text-uec-red" />
                     )}
                   </div>
-
                   <div className="min-w-0">
-                    <h4 className="font-semibold text-white truncate">{file.title}</h4>
-                    <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5">
+                    <p className="font-semibold text-white truncate">{file.title}</p>
+                    <div className="flex items-center gap-2 text-[10px] text-slate-400">
                       <span>{file.file_name}</span>
                       <span>•</span>
-                      <span className="font-mono">{file.file_size_formatted}</span>
+                      <span>{file.file_size_formatted}</span>
                       <span>•</span>
-                      <span className="text-slate-300">{CATEGORY_LABELS[file.category]}</span>
+                      <span className="text-uec-cyan">{CATEGORY_LABELS[file.category]}</span>
+                      {file.department_name && (
+                        <>
+                          <span>•</span>
+                          <span className="text-slate-300">{file.department_name}</span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0">
-                  <Button
-                    variant="outline"
-                    size="sm"
+                  <button
                     onClick={() => handleCopyLink(file.url)}
+                    className="p-1.5 rounded-lg border border-[#1F2937] bg-[#111827] text-slate-400 hover:text-white"
+                    title="Copier le lien"
                   >
-                    <Copy size={13} className="mr-1" />
-                    Lien
-                  </Button>
+                    <Copy size={13} />
+                  </button>
                   <a
                     href={file.url}
                     download={file.file_name}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center justify-center px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 text-white hover:bg-slate-700 transition-colors"
+                    className="p-1.5 rounded-lg border border-[#1F2937] bg-[#111827] text-slate-400 hover:text-white"
+                    title="Télécharger"
                   >
-                    <Download size={13} className="mr-1" />
-                    Télécharger
+                    <Download size={13} />
                   </a>
+                  {canManage && (
+                    <>
+                      <button
+                        onClick={() => {
+                          setEditingFile(file);
+                          setIsEditOpen(true);
+                        }}
+                        className="p-1.5 rounded-lg border border-[#1F2937] bg-[#111827] text-slate-400 hover:text-white"
+                        title="Modifier"
+                      >
+                        <Edit2 size={13} />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteFile(file.id, file.title)}
+                        disabled={isPending}
+                        className="p-1.5 rounded-lg border border-[#1F2937] bg-[#111827] text-slate-400 hover:text-rose-400"
+                        title="Supprimer"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             ))}
@@ -535,8 +635,14 @@ export function MediaView({ initialFiles, departments, userRole }: MediaViewProp
                 >
                   Annuler
                 </Button>
-                <Button type="submit" variant="primary" size="sm" disabled={isUploading}>
-                  {isUploading ? "Transfert en cours..." : "Téléverser sur Supabase"}
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="sm"
+                  disabled={isUploading || !uploadFile}
+                  className="bg-uec-red hover:bg-uec-red/90 text-white"
+                >
+                  {isUploading ? "Téléversement..." : "Confirmer l'Import"}
                 </Button>
               </div>
             </form>
@@ -544,62 +650,82 @@ export function MediaView({ initialFiles, departments, userRole }: MediaViewProp
         </div>
       )}
 
+      {/* Edit Media Modal */}
+      <MediaEditModal
+        isOpen={isEditOpen}
+        onClose={() => {
+          setIsEditOpen(false);
+          setEditingFile(null);
+        }}
+        file={editingFile}
+        departments={departments}
+        onSuccess={(updated) => {
+          setFiles((prev) => prev.map((f) => (f.id === updated.id ? updated : f)));
+          setActionMessage({ text: "Fichier mis à jour avec succès." });
+          setTimeout(() => setActionMessage(null), 3000);
+        }}
+      />
+
       {/* Preview Modal */}
       {previewItem && (
-        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-[#0e0e12] border border-white/10 rounded-2xl w-full max-w-3xl shadow-2xl shadow-black/90 overflow-hidden relative">
+        <div
+          onClick={() => setPreviewItem(null)}
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-[#0e0e12] border border-white/10 rounded-2xl max-w-3xl w-full p-4 overflow-hidden relative shadow-2xl"
+          >
             <button
               onClick={() => setPreviewItem(null)}
-              className="absolute top-4 right-4 rtl:right-auto rtl:left-4 z-10 p-2 bg-slate-900/80 rounded-full text-white hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-uec-blue"
+              className="absolute top-3 right-3 rtl:right-auto rtl:left-3 p-1 rounded-lg text-slate-400 hover:text-white bg-slate-900/60 z-10"
               aria-label="Fermer"
             >
               <X size={20} />
             </button>
 
-            <div className="h-96 relative bg-[#0B1020] flex items-center justify-center p-6">
+            <h3 className="text-sm font-bold text-white mb-3 pr-8 rtl:pr-0 rtl:pl-8 truncate">{previewItem.title}</h3>
+
+            <div className="w-full h-[60vh] bg-black/60 rounded-xl relative flex items-center justify-center overflow-hidden border border-white/5">
               {previewItem.mime_type.startsWith("image/") ? (
                 <Image
                   src={previewItem.url}
                   alt={previewItem.title}
                   fill
-                  className="object-contain p-4"
+                  className="object-contain"
                   unoptimized
                 />
               ) : previewItem.mime_type.startsWith("video/") ? (
-                <video src={previewItem.url} controls className="max-h-full max-w-full" />
+                <video src={previewItem.url} controls className="max-h-full max-w-full rounded" />
               ) : (
-                <FileText size={80} className="text-uec-red" />
+                <div className="text-center p-6 space-y-3">
+                  <FileText size={48} className="mx-auto text-uec-red" />
+                  <p className="text-xs text-slate-300">Aperçu non disponible pour ce format de document.</p>
+                  <a
+                    href={previewItem.url}
+                    download={previewItem.file_name}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-uec-red text-white text-xs font-semibold"
+                  >
+                    <Download size={14} />
+                    <span>Télécharger le document</span>
+                  </a>
+                </div>
               )}
             </div>
 
-            <div className="p-4 border-t border-[#1F2937] flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-white">{previewItem.title}</h3>
-                <p className="text-xs text-slate-400">
-                  {previewItem.file_name} • {previewItem.file_size_formatted}
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleCopyLink(previewItem.url)}
-                >
-                  <Copy size={14} className="mr-1.5" />
-                  Copier le lien
-                </Button>
-                <a
-                  href={previewItem.url}
-                  download={previewItem.file_name}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center justify-center px-3 py-1.5 text-xs font-semibold rounded-lg bg-uec-red text-white hover:bg-red-700 transition-colors"
-                >
-                  <Download size={14} className="mr-1.5" />
-                  Télécharger
-                </a>
-              </div>
+            <div className="flex items-center justify-between text-xs text-slate-400 pt-3">
+              <span>{previewItem.file_name} • {previewItem.file_size_formatted}</span>
+              <a
+                href={previewItem.url}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1 text-uec-cyan hover:underline"
+              >
+                <span>Ouvrir URL source</span>
+                <ExternalLink size={12} />
+              </a>
             </div>
           </div>
         </div>

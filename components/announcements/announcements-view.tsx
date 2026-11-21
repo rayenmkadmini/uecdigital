@@ -16,10 +16,18 @@ import {
   X,
   Sparkles,
   Users,
+  Search,
+  Edit2,
+  Trash2,
 } from "lucide-react";
 import type { AnnouncementItem } from "@/lib/data/announcements";
 import type { DepartmentWithStats } from "@/lib/data/departments";
-import { createAnnouncementAction, togglePinAnnouncementAction } from "@/app/actions/announcements";
+import {
+  createAnnouncementAction,
+  togglePinAnnouncementAction,
+  deleteAnnouncementAction,
+} from "@/app/actions/announcements";
+import { AnnouncementEditModal } from "./announcement-edit-modal";
 
 interface AnnouncementsViewProps {
   initialAnnouncements: AnnouncementItem[];
@@ -54,7 +62,14 @@ export function AnnouncementsView({
   userRole,
 }: AnnouncementsViewProps) {
   const [announcements, setAnnouncements] = useState<AnnouncementItem[]>(initialAnnouncements);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [priorityFilter, setPriorityFilter] = useState("ALL");
+  const [deptFilter, setDeptFilter] = useState("ALL");
+
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [editingAnnouncement, setEditingAnnouncement] = useState<AnnouncementItem | null>(null);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+
   const [isPending, startTransition] = useTransition();
   const [actionMessage, setActionMessage] = useState<{ text: string; error?: boolean } | null>(null);
 
@@ -129,6 +144,35 @@ export function AnnouncementsView({
     });
   };
 
+  const handleDeleteAnnouncement = (id: string, title: string) => {
+    if (!confirm(`Supprimer définitivement l'annonce "${title}" ?`)) return;
+
+    startTransition(async () => {
+      const res = await deleteAnnouncementAction(id);
+      if (res.success) {
+        setAnnouncements((prev) => prev.filter((a) => a.id !== id));
+        setActionMessage({ text: "Annonce supprimée avec succès." });
+      } else {
+        setActionMessage({ text: res.message, error: true });
+      }
+      setTimeout(() => setActionMessage(null), 3000);
+    });
+  };
+
+  const filteredAnnouncements = announcements.filter((ann) => {
+    const s = searchTerm.toLowerCase().trim();
+    const matchSearch =
+      !s ||
+      ann.title.toLowerCase().includes(s) ||
+      ann.content.toLowerCase().includes(s) ||
+      ann.author_name.toLowerCase().includes(s);
+
+    const matchPriority = priorityFilter === "ALL" || ann.priority === priorityFilter;
+    const matchDept = deptFilter === "ALL" || ann.department_id === deptFilter;
+
+    return matchSearch && matchPriority && matchDept;
+  });
+
   return (
     <div className="space-y-6">
       {/* Title & Action */}
@@ -139,12 +183,17 @@ export function AnnouncementsView({
             <span>Annonces & Directives Officielles</span>
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Communications institutionnelles, directives opérationnelles et consignes du Bureau UEC.
+            Communications institutionnelles, directives opérationnelles et consignes du Bureau UEC ({announcements.length} annonces répertoriées).
           </p>
         </div>
 
         {canPublish && (
-          <Button variant="primary" size="sm" onClick={() => setIsCreateOpen(true)}>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setIsCreateOpen(true)}
+            className="bg-uec-red hover:bg-uec-red/90 text-white"
+          >
             <Plus size={15} className="mr-1.5" />
             Publier une Annonce
           </Button>
@@ -168,26 +217,72 @@ export function AnnouncementsView({
         </div>
       )}
 
+      {/* Filter and search bar */}
+      <Card>
+        <CardContent className="p-4 flex flex-col md:flex-row gap-3">
+          <div className="relative flex-1">
+            <Search
+              size={15}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 rtl:left-auto rtl:right-3"
+            />
+            <Input
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Rechercher une directive, annonce ou consigne..."
+              className="pl-9 rtl:pl-3 rtl:pr-9 text-xs"
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5 overflow-x-auto">
+            {["ALL", "CRITICAL", "HIGH", "NORMAL", "LOW"].map((prio) => (
+              <button
+                key={prio}
+                onClick={() => setPriorityFilter(prio)}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md whitespace-nowrap transition-colors ${
+                  priorityFilter === prio
+                    ? "bg-uec-red text-white"
+                    : "bg-[#111827] border border-[#1F2937] text-slate-400 hover:text-white"
+                }`}
+              >
+                {prio === "ALL" ? "Toutes" : prio}
+              </button>
+            ))}
+          </div>
+
+          <select
+            value={deptFilter}
+            onChange={(e) => setDeptFilter(e.target.value)}
+            className="bg-[#0B1020] text-xs text-white rounded-lg px-3 py-2 border border-[#1F2937] focus:border-uec-blue focus:outline-none"
+          >
+            <option value="ALL">Tous les Destinataires</option>
+            {departments.map((d) => (
+              <option key={d.id} value={d.id}>
+                Pôle {d.name}
+              </option>
+            ))}
+          </select>
+        </CardContent>
+      </Card>
+
       {/* Announcements Stream */}
-      {announcements.length === 0 ? (
+      {filteredAnnouncements.length === 0 ? (
         <EmptyState
           icon={Megaphone}
-          title="Aucune annonce publiée"
+          title="Aucune annonce trouvée"
           description="Les directives officielles et communications internes du bureau exécutif apparaîtront ici."
           action={
-            userRole === "SUPER_ADMIN"
+            canPublish
               ? {
                   label: "Publier une Annonce",
                   onClick: () => setIsCreateOpen(true),
                   icon: Plus,
-                  variant: "outline",
                 }
               : undefined
           }
         />
       ) : (
         <div className="space-y-4">
-          {announcements.map((ann) => {
+          {filteredAnnouncements.map((ann) => {
             const prioCfg = PRIORITY_BADGES[ann.priority] || PRIORITY_BADGES.NORMAL;
             const dateFormatted = new Date(ann.published_at).toLocaleDateString("fr-FR", {
               day: "numeric",
@@ -245,6 +340,29 @@ export function AnnouncementsView({
                           <Pin size={14} className={ann.is_pinned ? "fill-amber-400 text-amber-400" : ""} />
                         </button>
                       )}
+
+                      {canPublish && (
+                        <>
+                          <button
+                            onClick={() => {
+                              setEditingAnnouncement(ann);
+                              setIsEditOpen(true);
+                            }}
+                            className="p-1 text-slate-400 hover:text-white transition-colors"
+                            title="Modifier l'annonce"
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteAnnouncement(ann.id, ann.title)}
+                            disabled={isPending}
+                            className="p-1 text-slate-400 hover:text-rose-400 transition-colors"
+                            title="Supprimer l'annonce"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -296,42 +414,48 @@ export function AnnouncementsView({
                   required
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  placeholder="Ex: Directives officielles pour la couverture du Derby"
+                  placeholder="Ex: Briefing Général — Derby Capitale"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Niveau d'urgence *
+                    Priorité
                   </label>
                   <select
                     value={formData.priority}
                     onChange={(e) =>
                       setFormData({
                         ...formData,
-                        priority: e.target.value as "LOW" | "NORMAL" | "HIGH" | "CRITICAL",
+                        priority: e.target.value as any,
                       })
                     }
                     className="w-full bg-[#0B1020] text-xs text-white rounded-lg px-3 py-2 border border-[#1F2937] focus:border-uec-blue focus:outline-none"
                   >
-                    <option value="NORMAL">Information Générale</option>
-                    <option value="HIGH">Important</option>
+                    <option value="NORMAL">Information (Normale)</option>
+                    <option value="HIGH">Important (Haute)</option>
                     <option value="CRITICAL">Urgent & Prioritaire</option>
-                    <option value="LOW">Note informative</option>
+                    <option value="LOW">Note Interne</option>
                   </select>
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Pôle Destinataire
+                    Ciblage (Pôle)
                   </label>
                   <select
                     value={formData.department_id}
-                    onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        department_id: e.target.value,
+                        target_audience: e.target.value ? "DEPARTMENT" : "ALL",
+                      })
+                    }
                     className="w-full bg-[#0B1020] text-xs text-white rounded-lg px-3 py-2 border border-[#1F2937] focus:border-uec-blue focus:outline-none"
                   >
-                    <option value="">Tous les Pôles (Global)</option>
+                    <option value="">Tous les membres UEC</option>
                     {departments.map((d) => (
                       <option key={d.id} value={d.id}>
                         {d.name}
@@ -341,6 +465,20 @@ export function AnnouncementsView({
                 </div>
               </div>
 
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Message & Directives *
+                </label>
+                <textarea
+                  rows={5}
+                  required
+                  value={formData.content}
+                  onChange={(e) => setFormData({ ...formData, content: e.target.value })}
+                  placeholder="Rédigez ici le contenu de la directive ou communication officielle..."
+                  className="w-full bg-[#0B1020] text-xs text-white placeholder-slate-500 rounded-lg p-3 border border-[#1F2937] focus:border-uec-blue focus:outline-none resize-none leading-relaxed"
+                />
+              </div>
+
               {isSuperAdmin && (
                 <div className="flex items-center gap-2">
                   <input
@@ -348,27 +486,13 @@ export function AnnouncementsView({
                     id="is_pinned"
                     checked={formData.is_pinned}
                     onChange={(e) => setFormData({ ...formData, is_pinned: e.target.checked })}
-                    className="rounded bg-[#0B1020] border-slate-700 text-uec-red focus:ring-uec-red"
+                    className="rounded border-[#1F2937] text-uec-red focus:ring-uec-red"
                   />
                   <label htmlFor="is_pinned" className="text-xs text-slate-300 cursor-pointer">
-                    Épingler en haut de page pour tous les membres
+                    Épingler en tête de liste (Visibilité prioritaire)
                   </label>
                 </div>
               )}
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Corps du communiqué / Directive *
-                </label>
-                <textarea
-                  rows={6}
-                  required
-                  value={formData.content}
-                  onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-                  placeholder="Rédigez le texte officiel de l'annonce..."
-                  className="w-full bg-[#0B1020] text-xs text-white placeholder-slate-500 rounded-lg p-3 border border-[#1F2937] focus:border-uec-blue focus:outline-none"
-                />
-              </div>
 
               <div className="flex justify-end gap-2 pt-2">
                 <Button
@@ -379,14 +503,36 @@ export function AnnouncementsView({
                 >
                   Annuler
                 </Button>
-                <Button type="submit" variant="primary" size="sm" disabled={isPending}>
-                  {isPending ? "Publication..." : "Diffuser l'Annonce"}
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="sm"
+                  disabled={isPending}
+                  className="bg-uec-red hover:bg-uec-red/90 text-white"
+                >
+                  {isPending ? "Diffusion..." : "Diffuser l'Annonce"}
                 </Button>
               </div>
             </form>
           </div>
         </div>
       )}
+
+      {/* Edit Modal */}
+      <AnnouncementEditModal
+        isOpen={isEditOpen}
+        onClose={() => {
+          setIsEditOpen(false);
+          setEditingAnnouncement(null);
+        }}
+        announcement={editingAnnouncement}
+        departments={departments}
+        onSuccess={(updated) => {
+          setAnnouncements((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+          setActionMessage({ text: "Annonce mise à jour avec succès." });
+          setTimeout(() => setActionMessage(null), 3000);
+        }}
+      />
     </div>
   );
 }

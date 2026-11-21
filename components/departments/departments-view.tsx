@@ -4,23 +4,40 @@ import React, { useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Building2, Users, FolderKanban, CheckSquare, Shield, AlertCircle, Plus } from "lucide-react";
+import { Building2, Users, FolderKanban, CheckSquare, Shield, Plus, Edit2 } from "lucide-react";
 import type { DepartmentWithStats } from "@/lib/data/departments";
+import type { MemberListItem } from "@/lib/data/members";
 import type { UserRole } from "@/lib/auth/rbac";
+import { DepartmentModal } from "./department-modal";
 
 interface DepartmentsViewProps {
   departments: DepartmentWithStats[];
+  members?: MemberListItem[];
   userRole: UserRole;
 }
 
-export function DepartmentsView({ departments, userRole }: DepartmentsViewProps) {
+export function DepartmentsView({ departments, members = [], userRole }: DepartmentsViewProps) {
   const [filterActive, setFilterActive] = useState<"ALL" | "ACTIVE" | "INACTIVE">("ALL");
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedDept, setSelectedDept] = useState<DepartmentWithStats | null>(null);
+
+  const isSuperAdmin = userRole === "SUPER_ADMIN";
 
   const filtered = departments.filter((d) => {
     if (filterActive === "ACTIVE") return d.is_active;
     if (filterActive === "INACTIVE") return !d.is_active;
     return true;
   });
+
+  const handleOpenCreate = () => {
+    setSelectedDept(null);
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEdit = (dept: DepartmentWithStats) => {
+    setSelectedDept(dept);
+    setIsModalOpen(true);
+  };
 
   return (
     <div className="space-y-6">
@@ -35,7 +52,7 @@ export function DepartmentsView({ departments, userRole }: DepartmentsViewProps)
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <div className="flex items-center bg-[#111827] border border-[#1F2937] p-1 rounded-lg">
             {(["ALL", "ACTIVE", "INACTIVE"] as const).map((mode) => (
               <button
@@ -49,6 +66,18 @@ export function DepartmentsView({ departments, userRole }: DepartmentsViewProps)
               </button>
             ))}
           </div>
+
+          {isSuperAdmin && (
+            <Button
+              onClick={handleOpenCreate}
+              variant="primary"
+              size="sm"
+              className="flex items-center gap-1.5 bg-uec-red hover:bg-uec-red/90 text-white"
+            >
+              <Plus size={14} />
+              <span>Nouveau Pôle</span>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -76,10 +105,21 @@ export function DepartmentsView({ departments, userRole }: DepartmentsViewProps)
                   >
                     {dept.code}
                   </Badge>
-                  <span className="text-[11px] text-slate-400 flex items-center gap-1">
-                    <Shield size={12} className="text-uec-cyan" />
-                    <span>{dept.coordinator_name}</span>
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                      <Shield size={12} className="text-uec-cyan" />
+                      <span>{dept.coordinator_name}</span>
+                    </span>
+                    {isSuperAdmin && (
+                      <button
+                        onClick={() => handleOpenEdit(dept)}
+                        title="Modifier ce pôle"
+                        className="text-slate-400 hover:text-white transition-colors p-1 rounded hover:bg-slate-800"
+                      >
+                        <Edit2 size={13} />
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <CardTitle className="text-base text-white mt-2">{dept.name}</CardTitle>
                 <CardDescription className="text-slate-400 line-clamp-2 mt-1">
@@ -129,6 +169,15 @@ export function DepartmentsView({ departments, userRole }: DepartmentsViewProps)
             </Card>
           ))}
         </div>
+      )}
+
+      {isSuperAdmin && (
+        <DepartmentModal
+          isOpen={isModalOpen}
+          onClose={() => setIsModalOpen(false)}
+          department={selectedDept}
+          members={members}
+        />
       )}
     </div>
   );

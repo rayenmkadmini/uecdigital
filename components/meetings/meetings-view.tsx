@@ -23,14 +23,20 @@ import {
   Calendar,
   Layers,
   Sparkles,
+  Play,
+  Trash2,
+  Ban,
+  Check,
 } from "lucide-react";
-import type { MeetingListItem, MeetingStatus } from "@/lib/data/meetings";
+import type { MeetingListItem, MeetingStatus, AttendeeStatus } from "@/lib/data/meetings";
 import type { DepartmentWithStats } from "@/lib/data/departments";
 import type { MemberListItem } from "@/lib/data/members";
 import {
   createMeetingAction,
   updateMeetingStatusAction,
   saveMeetingMinutesAction,
+  rsvpMeetingAction,
+  deleteMeetingAction,
 } from "@/app/actions/meetings";
 
 interface MeetingsViewProps {
@@ -181,14 +187,14 @@ export function MeetingsView({
           creator_name: "Moi",
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-          attendees: formData.attendee_ids.map((uid) => {
-            const mem = members.find((m) => m.id === uid);
+          attendees: formData.attendee_ids.map((id) => {
+            const member = members.find((m) => m.id === id);
             return {
-              id: uid,
-              user_id: uid,
-              user_name: mem?.full_name || "Membre",
-              avatar_url: mem?.avatar_url || null,
-              status: "INVITED",
+              id: id,
+              user_id: id,
+              user_name: member?.full_name || "Membre",
+              avatar_url: member?.avatar_url || null,
+              status: "INVITED" as AttendeeStatus,
             };
           }),
           minutes: null,
@@ -228,16 +234,48 @@ export function MeetingsView({
     });
   };
 
-  const handleOpenMinutesModal = (meeting: MeetingListItem) => {
-    setSelectedMeetingMinutes(meeting);
-    if (meeting.minutes) {
+  const handleCancelMeeting = (meetingId: string, title: string) => {
+    if (!confirm(`Confirmez-vous l'annulation de la réunion "${title}" ? Les participants recevront une notification.`)) return;
+    handleStatusChange(meetingId, "CANCELLED");
+  };
+
+  const handleDeleteMeeting = (meetingId: string, title: string) => {
+    if (!confirm(`Supprimer définitivement la réunion "${title}" ?`)) return;
+
+    startTransition(async () => {
+      const res = await deleteMeetingAction(meetingId);
+      if (res.success) {
+        setMeetings((prev) => prev.filter((m) => m.id !== meetingId));
+        setActionMessage({ text: "Réunion supprimée avec succès." });
+      } else {
+        setActionMessage({ text: res.message, error: true });
+      }
+      setTimeout(() => setActionMessage(null), 3000);
+    });
+  };
+
+  const handleRsvp = (meetingId: string, rsvpStatus: "ACCEPTED" | "DECLINED" | "TENTATIVE") => {
+    startTransition(async () => {
+      const res = await rsvpMeetingAction(meetingId, rsvpStatus);
+      if (res.success) {
+        setActionMessage({ text: res.message });
+      } else {
+        setActionMessage({ text: res.message, error: true });
+      }
+      setTimeout(() => setActionMessage(null), 3000);
+    });
+  };
+
+  const handleOpenMinutesModal = (m: MeetingListItem) => {
+    setSelectedMeetingMinutes(m);
+    if (m.minutes) {
       setMinutesForm({
-        content: meeting.minutes.content,
+        content: m.minutes.content,
         decisionItem: "",
-        decisions: meeting.minutes.decisions,
+        decisions: m.minutes.decisions || [],
         actionItemText: "",
         actionItemAssignee: "",
-        action_items: meeting.minutes.action_items,
+        action_items: m.minutes.action_items || [],
       });
     } else {
       setMinutesForm({
@@ -268,7 +306,7 @@ export function MeetingsView({
         ...minutesForm.action_items,
         {
           text: minutesForm.actionItemText.trim(),
-          assignee: minutesForm.actionItemAssignee || undefined,
+          assignee: minutesForm.actionItemAssignee.trim() || undefined,
         },
       ],
       actionItemText: "",
@@ -296,7 +334,7 @@ export function MeetingsView({
                   ...m,
                   status: "COMPLETED",
                   minutes: {
-                    id: "temp-min",
+                    id: res.data?.id || "minutes-id",
                     meeting_id: m.id,
                     recorded_by: "",
                     recorder_name: "Moi",
@@ -314,26 +352,31 @@ export function MeetingsView({
       } else {
         setActionMessage({ text: res.message, error: true });
       }
-      setTimeout(() => setActionMessage(null), 3000);
+      setTimeout(() => setActionMessage(null), 4000);
     });
   };
 
   return (
     <div className="space-y-6">
-      {/* Title & Action */}
+      {/* Title */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
             <Users2 size={24} className="text-uec-red" />
-            <span>Réunions & Procès-Verbaux (PV)</span>
+            <span>Réunions, Comités & Procès-Verbaux</span>
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Organisation des réunions de pôles, ordres du jour, feuilles de présence et PV officiels.
+            Planification des assemblées de pôle, gouvernance, ordres du jour et archivage des PV officiels ({meetings.length} réunions enregistrées).
           </p>
         </div>
 
         {canManage && (
-          <Button variant="primary" size="sm" onClick={() => setIsCreateOpen(true)}>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setIsCreateOpen(true)}
+            className="bg-uec-red hover:bg-uec-red/90 text-white"
+          >
             <Plus size={15} className="mr-1.5" />
             Planifier une Réunion
           </Button>
@@ -387,13 +430,13 @@ export function MeetingsView({
         <CardContent className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="flex flex-1 items-center gap-2 flex-wrap">
             <div className="relative flex-1 min-w-[220px]">
-              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 rtl:left-auto rtl:right-3" />
               <input
                 type="text"
                 placeholder="Rechercher une réunion par titre..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full bg-[#111827] text-xs text-white placeholder-slate-500 rounded-lg pl-9 pr-3 py-2 border border-[#1F2937] focus:border-uec-blue focus:outline-none"
+                className="w-full bg-[#111827] text-xs text-white placeholder-slate-500 rounded-lg pl-9 pr-3 py-2 border border-[#1F2937] focus:border-uec-blue focus:outline-none rtl:pl-3 rtl:pr-9"
               />
             </div>
 
@@ -434,7 +477,7 @@ export function MeetingsView({
           title="Aucune réunion trouvée"
           description="Aucune session de réunion n'est programmée pour ces critères de recherche."
           action={
-            userRole === "SUPER_ADMIN" || userRole === "COORDINATOR"
+            canManage
               ? {
                   label: "Planifier une Réunion",
                   onClick: () => setIsCreateOpen(true),
@@ -479,7 +522,7 @@ export function MeetingsView({
                       <CardTitle className="text-base font-bold text-white">{m.title}</CardTitle>
                     </div>
 
-                    <div className="flex items-center gap-2 self-start sm:self-auto">
+                    <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
                       <Button
                         variant="outline"
                         size="sm"
@@ -491,12 +534,41 @@ export function MeetingsView({
 
                       {canManage && m.status === "SCHEDULED" && (
                         <Button
-                          variant="ghost"
+                          variant="primary"
                           size="sm"
                           disabled={isPending}
                           onClick={() => handleStatusChange(m.id, "IN_PROGRESS")}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white"
                         >
+                          <Play size={13} className="mr-1 fill-white" />
                           Démarrer
+                        </Button>
+                      )}
+
+                      {canManage && (m.status === "SCHEDULED" || m.status === "IN_PROGRESS") && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={isPending}
+                          onClick={() => handleCancelMeeting(m.id, m.title)}
+                          className="text-rose-400 hover:text-rose-300"
+                          title="Annuler la réunion"
+                        >
+                          <Ban size={13} className="mr-1" />
+                          Annuler
+                        </Button>
+                      )}
+
+                      {canManage && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={isPending}
+                          onClick={() => handleDeleteMeeting(m.id, m.title)}
+                          className="text-slate-400 hover:text-rose-400"
+                          title="Supprimer la réunion"
+                        >
+                          <Trash2 size={13} />
                         </Button>
                       )}
                     </div>
@@ -530,14 +602,40 @@ export function MeetingsView({
                         className="flex items-center gap-1 text-blue-400 hover:underline"
                       >
                         <Video size={14} />
-                        Lien Visio <ExternalLink size={12} className="ml-0.5" />
+                        <span>Lien Visio</span>
+                        <ExternalLink size={12} />
                       </a>
                     )}
                   </div>
 
+                  {/* RSVP Response Pills */}
+                  {m.status === "SCHEDULED" && (
+                    <div className="flex items-center gap-2 pt-1 border-t border-[#1F2937]/60">
+                      <span className="text-[11px] text-slate-400 font-medium">Votre présence :</span>
+                      <button
+                        onClick={() => handleRsvp(m.id, "ACCEPTED")}
+                        className="px-2.5 py-1 text-[11px] rounded bg-emerald-950/60 border border-emerald-700/60 text-emerald-300 hover:bg-emerald-900/60 transition-colors"
+                      >
+                        ✓ Présent
+                      </button>
+                      <button
+                        onClick={() => handleRsvp(m.id, "DECLINED")}
+                        className="px-2.5 py-1 text-[11px] rounded bg-rose-950/60 border border-rose-700/60 text-rose-300 hover:bg-rose-900/60 transition-colors"
+                      >
+                        ✗ Absent
+                      </button>
+                      <button
+                        onClick={() => handleRsvp(m.id, "TENTATIVE")}
+                        className="px-2.5 py-1 text-[11px] rounded bg-amber-950/60 border border-amber-700/60 text-amber-300 hover:bg-amber-900/60 transition-colors"
+                      >
+                        ? Indécis
+                      </button>
+                    </div>
+                  )}
+
                   {/* Agenda */}
-                  {m.agenda.length > 0 && (
-                    <div>
+                  {m.agenda && m.agenda.length > 0 && (
+                    <div className="border-t border-[#1F2937] pt-3">
                       <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
                         Ordre du jour :
                       </h4>
@@ -631,7 +729,7 @@ export function MeetingsView({
                   <Input
                     type="number"
                     min={15}
-                    max={360}
+                    step={15}
                     value={formData.duration_min}
                     onChange={(e) =>
                       setFormData({ ...formData, duration_min: Number(e.target.value) })
@@ -740,7 +838,7 @@ export function MeetingsView({
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
+              <div className="flex justify-end gap-2 pt-2 border-t border-[#1F2937]">
                 <Button
                   type="button"
                   variant="outline"
@@ -749,7 +847,7 @@ export function MeetingsView({
                 >
                   Annuler
                 </Button>
-                <Button type="submit" variant="primary" size="sm" disabled={isPending}>
+                <Button type="submit" variant="primary" size="sm" disabled={isPending} className="bg-uec-red hover:bg-uec-red/90 text-white">
                   {isPending ? "Création..." : "Planifier"}
                 </Button>
               </div>
@@ -877,8 +975,8 @@ export function MeetingsView({
                 >
                   Fermer
                 </Button>
-                <Button type="submit" variant="primary" size="sm" disabled={isPending}>
-                  {isPending ? "Enregistrement..." : "Valider & Archiver le PV"}
+                <Button type="submit" variant="primary" size="sm" disabled={isPending} className="bg-uec-red hover:bg-uec-red/90 text-white">
+                  {isPending ? "Enregistrement..." : "Archiver & Clôturer PV"}
                 </Button>
               </div>
             </form>

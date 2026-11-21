@@ -22,13 +22,23 @@ import {
   FolderKanban,
   FileText,
   User,
+  Eye,
+  Edit2,
+  Trash2,
 } from "lucide-react";
 import type { TaskListItem, TaskStatus, TaskPriority } from "@/lib/data/tasks";
 import type { ProjectListItem } from "@/lib/data/projects";
 import type { DepartmentWithStats } from "@/lib/data/departments";
 import type { MemberListItem } from "@/lib/data/members";
 import type { UserRole } from "@/lib/auth/rbac";
-import { createTaskAction, updateTaskStatusAction, submitDeliverableAction } from "@/app/actions/tasks";
+import {
+  createTaskAction,
+  updateTaskStatusAction,
+  submitDeliverableAction,
+  deleteTaskAction,
+} from "@/app/actions/tasks";
+import { TaskDetailModal } from "./task-detail-modal";
+import { TaskEditModal } from "./task-edit-modal";
 
 interface TasksViewProps {
   tasks: TaskListItem[];
@@ -40,21 +50,27 @@ interface TasksViewProps {
 }
 
 export function TasksView({
-  tasks,
+  tasks: initialTasks,
   projects,
   departments,
   members,
   userRole,
   currentUserId,
 }: TasksViewProps) {
+  const [tasks, setTasks] = useState<TaskListItem[]>(initialTasks);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [deptFilter, setDeptFilter] = useState<string>("ALL");
   const [projectFilter, setProjectFilter] = useState<string>("ALL");
 
-  // Modals
+  // Modals state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<TaskListItem | null>(null);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<TaskListItem | null>(null);
+  const [isEditOpen, setIsEditOpen] = useState(false);
   const [submittingTaskId, setSubmittingTaskId] = useState<string | null>(null);
+
   const [isPending, setIsPending] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
@@ -113,7 +129,41 @@ export function TasksView({
 
       if (res.success) {
         setFeedback({ type: "success", message: res.message });
-        setTimeout(() => setIsCreateOpen(false), 1000);
+        const dept = departments.find((d) => d.id === createForm.department_id);
+        const proj = projects.find((p) => p.id === createForm.project_id);
+        const assignedMembers = members.filter((m) => createForm.assignee_ids.includes(m.id));
+
+        const newTask: TaskListItem = {
+          id: res.data.id,
+          title: createForm.title.trim(),
+          description: createForm.description.trim() || null,
+          acceptance_criteria: createForm.acceptance_criteria.trim() || null,
+          project_id: createForm.project_id || null,
+          project_title: proj?.title || null,
+          project_code: proj?.code || null,
+          department_id: createForm.department_id,
+          department_name: dept?.name || "Département",
+          department_code: dept?.code || "UEC",
+          department_color: dept?.color || "#E01E26",
+          priority: createForm.priority,
+          status: "TODO",
+          start_date: null,
+          deadline: createForm.deadline ? new Date(createForm.deadline).toISOString() : null,
+          created_by: currentUserId,
+          creator_name: "Moi",
+          coordinator_id: dept?.coordinator_id || null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          assignees: assignedMembers.map((m) => ({
+            id: m.id,
+            user_id: m.id,
+            full_name: m.full_name,
+            avatar_url: m.avatar_url,
+          })),
+        };
+
+        setTasks([newTask, ...tasks]);
+        setTimeout(() => setIsCreateOpen(false), 800);
       } else {
         setFeedback({ type: "error", message: res.message });
       }
@@ -155,7 +205,12 @@ export function TasksView({
 
       if (res.success) {
         setFeedback({ type: "success", message: res.message });
-        setTimeout(() => setSubmittingTaskId(null), 1200);
+        setTasks((prev) =>
+          prev.map((t) =>
+            t.id === submittingTaskId ? { ...t, status: "COORDINATOR_REVIEW" } : t
+          )
+        );
+        setTimeout(() => setSubmittingTaskId(null), 1000);
       } else {
         setFeedback({ type: "error", message: res.message });
       }
@@ -170,13 +225,42 @@ export function TasksView({
     setIsPending(true);
     try {
       const res = await updateTaskStatusAction(taskId, "IN_PROGRESS");
-      if (!res.success) {
-        alert(res.message);
+      if (res.success) {
+        setTasks((prev) =>
+          prev.map((t) => (t.id === taskId ? { ...t, status: "IN_PROGRESS" } : t))
+        );
+        if (selectedTask?.id === taskId) {
+          setSelectedTask({ ...selectedTask, status: "IN_PROGRESS" });
+        }
+        setFeedback({ type: "success", message: "Tâche démarrée avec succès." });
+      } else {
+        setFeedback({ type: "error", message: res.message });
       }
     } catch (err: any) {
-      alert(err.message || "Erreur lors du démarrage");
+      setFeedback({ type: "error", message: err.message || "Erreur lors du démarrage" });
     } finally {
       setIsPending(false);
+      setTimeout(() => setFeedback(null), 3000);
+    }
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    setIsPending(true);
+    try {
+      const res = await deleteTaskAction(taskId);
+      if (res.success) {
+        setTasks((prev) => prev.filter((t) => t.id !== taskId));
+        setIsDetailOpen(false);
+        setSelectedTask(null);
+        setFeedback({ type: "success", message: "Tâche supprimée avec succès." });
+      } else {
+        setFeedback({ type: "error", message: res.message });
+      }
+    } catch (err: any) {
+      setFeedback({ type: "error", message: err.message || "Erreur de suppression" });
+    } finally {
+      setIsPending(false);
+      setTimeout(() => setFeedback(null), 3000);
     }
   };
 
@@ -220,6 +304,16 @@ export function TasksView({
     return matchSearch && matchStatus && matchDept && matchProj;
   });
 
+  const openDetail = (task: TaskListItem) => {
+    setSelectedTask(task);
+    setIsDetailOpen(true);
+  };
+
+  const openEdit = (task: TaskListItem) => {
+    setEditingTask(task);
+    setIsEditOpen(true);
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Header */}
@@ -235,12 +329,26 @@ export function TasksView({
         </div>
 
         {canCreate && (
-          <Button variant="primary" size="sm" onClick={handleOpenCreate}>
+          <Button variant="primary" size="sm" onClick={handleOpenCreate} className="bg-uec-red hover:bg-uec-red/90 text-white">
             <Plus size={15} className="mr-1.5" />
             Nouvelle Tâche
           </Button>
         )}
       </div>
+
+      {/* Feedback banner */}
+      {feedback && (
+        <div
+          className={`p-3 rounded-lg text-xs flex items-center gap-2 animate-in fade-in ${
+            feedback.type === "error"
+              ? "bg-rose-500/10 border border-rose-500/30 text-rose-400"
+              : "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400"
+          }`}
+        >
+          {feedback.type === "error" ? <AlertCircle size={14} /> : <CheckCircle2 size={14} />}
+          <span>{feedback.message}</span>
+        </div>
+      )}
 
       {/* Filter and Search Bar */}
       <div className="flex flex-col md:flex-row gap-3">
@@ -271,18 +379,20 @@ export function TasksView({
                 statusFilter === st ? "bg-uec-red text-white" : "text-slate-400 hover:text-white"
               }`}
             >
-              {st === "ALL" ? "Toutes" : st.replace("_", " ")}
+              {st === "ALL" ? "Toutes" : st.replace(/_/g, " ")}
             </button>
           ))}
         </div>
+      </div>
 
-        {/* Department filter */}
+      {/* Secondary Dropdown Filters */}
+      <div className="flex flex-col sm:flex-row gap-3">
         <select
           value={deptFilter}
           onChange={(e) => setDeptFilter(e.target.value)}
-          className="bg-[#111827] border border-[#1F2937] text-slate-200 text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-uec-red"
+          className="bg-[#111827] border border-[#1F2937] text-white text-xs rounded-lg p-2.5 flex-1 focus:outline-none focus:border-uec-red"
         >
-          <option value="ALL">Tous les pôles</option>
+          <option value="ALL">Tous les pôles ({departments.length})</option>
           {departments.map((d) => (
             <option key={d.id} value={d.id}>
               {d.name} ({d.code})
@@ -290,13 +400,12 @@ export function TasksView({
           ))}
         </select>
 
-        {/* Project filter */}
         <select
           value={projectFilter}
           onChange={(e) => setProjectFilter(e.target.value)}
-          className="bg-[#111827] border border-[#1F2937] text-slate-200 text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-uec-red"
+          className="bg-[#111827] border border-[#1F2937] text-white text-xs rounded-lg p-2.5 flex-1 focus:outline-none focus:border-uec-red"
         >
-          <option value="ALL">Tous les projets</option>
+          <option value="ALL">Tous les projets ({projects.length})</option>
           {projects.map((p) => (
             <option key={p.id} value={p.id}>
               {p.title} ({p.code})
@@ -328,17 +437,20 @@ export function TasksView({
             <div className="divide-y divide-[#1F2937]">
               {filtered.map((task) => {
                 const isAssigned = task.assignees.some((a) => a.user_id === currentUserId);
-                const canStart = (isAssigned || userRole === "SUPER_ADMIN" || userRole === "COORDINATOR") && task.status === "TODO";
-                const canSubmit = isAssigned || userRole === "SUPER_ADMIN" || userRole === "COORDINATOR";
+                const canManage = userRole === "SUPER_ADMIN" || userRole === "COORDINATOR";
+                const canStart = (isAssigned || canManage) && task.status === "TODO";
+                const canSubmit = (isAssigned || canManage) && task.status !== "APPROVED" && task.status !== "DONE";
 
                 return (
                   <div
                     key={task.id}
                     className="p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 hover:bg-slate-900/40 transition-colors"
                   >
-                    <div className="space-y-2 flex-1">
+                    <div className="space-y-2 flex-1 cursor-pointer" onClick={() => openDetail(task)}>
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-bold text-white">{task.title}</span>
+                        <span className="text-sm font-bold text-white hover:text-uec-red transition-colors">
+                          {task.title}
+                        </span>
                         <Badge
                           variant={task.priority === "CRITICAL" || task.priority === "HIGH" ? "red" : "default"}
                           size="sm"
@@ -384,11 +496,22 @@ export function TasksView({
 
                     {/* Action buttons */}
                     <div className="flex items-center gap-2 self-end lg:self-center">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs text-slate-400 hover:text-white"
+                        onClick={() => openDetail(task)}
+                        title="Voir les spécifications complètes"
+                      >
+                        <Eye size={13} className="mr-1" />
+                        Détails
+                      </Button>
+
                       {canStart && (
                         <Button
                           variant="outline"
                           size="sm"
-                          className="text-xs flex items-center gap-1"
+                          className="text-xs flex items-center gap-1 border-emerald-600/40 text-emerald-400 hover:bg-emerald-950/30"
                           disabled={isPending}
                           onClick={() => handleStartTask(task.id)}
                         >
@@ -397,16 +520,26 @@ export function TasksView({
                         </Button>
                       )}
 
-                      {canSubmit && task.status !== "APPROVED" && (
+                      {canSubmit && (
                         <Button
                           variant="primary"
                           size="sm"
-                          className="text-xs flex items-center gap-1"
+                          className="text-xs flex items-center gap-1 bg-uec-blue hover:bg-uec-blue/90 text-white"
                           onClick={() => handleOpenSubmitDeliverable(task.id)}
                         >
                           <Upload size={12} />
                           <span>Déposer Livrable</span>
                         </Button>
+                      )}
+
+                      {canManage && (
+                        <button
+                          onClick={() => openEdit(task)}
+                          className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                          title="Modifier la tâche"
+                        >
+                          <Edit2 size={14} />
+                        </button>
                       )}
                     </div>
                   </div>
@@ -429,26 +562,10 @@ export function TasksView({
               <X size={18} />
             </button>
 
-            <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-1">
-              <CheckSquare size={20} className="text-uec-red" />
-              <span>Créer une Nouvelle Tâche</span>
-            </h3>
-            <p className="text-xs text-slate-400 mb-4">
-              Déléguer un livrable ou un travail à réaliser au sein d'un pôle de compétences.
-            </p>
-
-            {feedback && (
-              <div
-                className={`mb-4 p-3 rounded-lg text-xs flex items-center gap-2 ${
-                  feedback.type === "success"
-                    ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400"
-                    : "bg-red-500/10 border border-red-500/30 text-red-400"
-                }`}
-              >
-                {feedback.type === "success" ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
-                <span>{feedback.message}</span>
-              </div>
-            )}
+            <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+              <Plus size={18} className="text-uec-red" />
+              <span>Créer une Tâche de Production</span>
+            </h2>
 
             <form onSubmit={handleCreateSubmit} className="space-y-4">
               <div>
@@ -520,7 +637,7 @@ export function TasksView({
 
                 <div>
                   <label className="text-xs font-semibold text-slate-300 block mb-1">
-                    Date Limite (Deadline)
+                    Date Limite
                   </label>
                   <Input
                     type="date"
@@ -532,51 +649,13 @@ export function TasksView({
 
               <div>
                 <label className="text-xs font-semibold text-slate-300 block mb-1">
-                  Assigner des Membres
-                </label>
-                <div className="max-h-28 overflow-y-auto bg-[#172033] border border-[#27354F] rounded-lg p-2 space-y-1">
-                  {members.map((m) => {
-                    const isSelected = createForm.assignee_ids.includes(m.id);
-                    return (
-                      <label
-                        key={m.id}
-                        className="flex items-center gap-2 text-xs text-slate-300 hover:text-white cursor-pointer p-1 rounded hover:bg-[#1f2d48]"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setCreateForm({
-                                ...createForm,
-                                assignee_ids: [...createForm.assignee_ids, m.id],
-                              });
-                            } else {
-                              setCreateForm({
-                                ...createForm,
-                                assignee_ids: createForm.assignee_ids.filter((id) => id !== m.id),
-                              });
-                            }
-                          }}
-                          className="accent-uec-red"
-                        />
-                        <span>{m.full_name}</span>
-                        <span className="text-[10px] text-slate-400">({m.role})</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-1">
-                  Description de la Tâche
+                  Description des Travaux
                 </label>
                 <textarea
-                  placeholder="Instructions précises, contexte..."
+                  placeholder="Détaillez le travail attendu..."
                   value={createForm.description}
                   onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })}
-                  className="w-full bg-[#172033] border border-[#27354F] text-white text-xs rounded-lg p-2.5 h-16 resize-none focus:outline-none focus:border-uec-red"
+                  className="w-full bg-[#172033] border border-[#27354F] text-white text-xs rounded-lg p-3 min-h-[70px] resize-none"
                 />
               </div>
 
@@ -585,24 +664,58 @@ export function TasksView({
                   Critères d'Acceptation
                 </label>
                 <textarea
-                  placeholder="Exigences techniques, dimensions, format, résolution attendue..."
+                  placeholder="Conditions requises pour la validation..."
                   value={createForm.acceptance_criteria}
                   onChange={(e) => setCreateForm({ ...createForm, acceptance_criteria: e.target.value })}
-                  className="w-full bg-[#172033] border border-[#27354F] text-white text-xs rounded-lg p-2.5 h-16 resize-none focus:outline-none focus:border-uec-red"
+                  className="w-full bg-[#172033] border border-[#27354F] text-white text-xs rounded-lg p-3 min-h-[60px] resize-none"
                 />
               </div>
 
-              <div className="mt-6 pt-4 border-t border-[#1F2937] flex justify-end gap-2">
+              {/* Assignees select */}
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                  Membres Assignés ({createForm.assignee_ids.length} sélectionnés)
+                </label>
+                <div className="max-h-32 overflow-y-auto p-2 rounded-lg bg-[#111827] border border-[#27354F] grid grid-cols-2 gap-1.5">
+                  {members.map((m) => {
+                    const selected = createForm.assignee_ids.includes(m.id);
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => {
+                          setCreateForm((prev) => ({
+                            ...prev,
+                            assignee_ids: selected
+                              ? prev.assignee_ids.filter((id) => id !== m.id)
+                              : [...prev.assignee_ids, m.id],
+                          }));
+                        }}
+                        className={`text-left px-2 py-1 rounded text-xs flex items-center justify-between transition-colors ${
+                          selected
+                            ? "bg-uec-red/20 border border-uec-red text-white"
+                            : "bg-[#172033] text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        <span className="truncate">{m.full_name}</span>
+                        {selected && <Check size={11} className="text-uec-red" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-[#1F2937]">
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
                   onClick={() => setIsCreateOpen(false)}
                 >
                   Annuler
                 </Button>
-                <Button type="submit" variant="primary" size="sm" disabled={isPending}>
-                  {isPending ? "Création..." : "Créer la Tâche"}
+                <Button type="submit" variant="primary" size="sm" disabled={isPending} className="bg-uec-red hover:bg-uec-red/90 text-white">
+                  {isPending ? "Création en cours..." : "Créer la Tâche"}
                 </Button>
               </div>
             </form>
@@ -613,7 +726,7 @@ export function TasksView({
       {/* MODAL: Déposer un Livrable */}
       {submittingTaskId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-150">
-          <div className="bg-[#0e0e12] border border-white/10 rounded-2xl max-w-md w-full p-6 shadow-2xl shadow-black/90 relative">
+          <div className="bg-[#0e0e12] border border-white/10 rounded-2xl max-w-lg w-full p-6 shadow-2xl shadow-black/90 relative">
             <button
               onClick={() => setSubmittingTaskId(null)}
               className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors focus:outline-none focus:ring-2 focus:ring-uec-blue"
@@ -622,34 +735,21 @@ export function TasksView({
               <X size={18} />
             </button>
 
-            <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-1">
-              <Upload size={20} className="text-uec-red" />
-              <span>Dépôt de Livrable pour Revue</span>
-            </h3>
+            <h2 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
+              <Upload size={18} className="text-uec-blue" />
+              <span>Soumettre un Livrable pour Validation</span>
+            </h2>
             <p className="text-xs text-slate-400 mb-4">
-              Votre travail sera soumis au Coordinateur pour vérification de conformité avant envoi au Super Admin.
+              Ce livrable sera transmis au Coordinateur de Pôle pour revue technique avant transmission finale au Super Admin.
             </p>
-
-            {feedback && (
-              <div
-                className={`mb-4 p-3 rounded-lg text-xs flex items-center gap-2 ${
-                  feedback.type === "success"
-                    ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400"
-                    : "bg-red-500/10 border border-red-500/30 text-red-400"
-                }`}
-              >
-                {feedback.type === "success" ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
-                <span>{feedback.message}</span>
-              </div>
-            )}
 
             <form onSubmit={handleSubmitDeliverable} className="space-y-4">
               <div>
                 <label className="text-xs font-semibold text-slate-300 block mb-1">
-                  Titre du Livrable *
+                  Titre du livrable *
                 </label>
                 <Input
-                  placeholder="Ex: Affiche officielle format vertical 4K"
+                  placeholder="Ex: Maquette V1 Affiche 1080x1350 & Export PNG"
                   value={deliverableForm.title}
                   onChange={(e) => setDeliverableForm({ ...deliverableForm, title: e.target.value })}
                   required
@@ -658,46 +758,80 @@ export function TasksView({
 
               <div>
                 <label className="text-xs font-semibold text-slate-300 block mb-1">
-                  Note explicative / Description des travaux *
+                  Notes / Description pour les réviseurs *
                 </label>
                 <textarea
-                  placeholder="Expliquez ce qui a été réalisé, les choix graphiques ou techniques..."
+                  placeholder="Précisez les choix graphiques, versions des logiciels utilisées, etc..."
                   value={deliverableForm.description}
                   onChange={(e) => setDeliverableForm({ ...deliverableForm, description: e.target.value })}
-                  className="w-full bg-[#172033] border border-[#27354F] text-white text-xs rounded-lg p-2.5 h-20 resize-none focus:outline-none focus:border-uec-red"
+                  className="w-full bg-[#172033] border border-[#27354F] text-white text-xs rounded-lg p-3 min-h-[80px] resize-none"
                   required
                 />
               </div>
 
               <div>
                 <label className="text-xs font-semibold text-slate-300 block mb-1">
-                  Liens des fichiers / Assets (un lien par ligne)
+                  Liens vers les fichiers (Google Drive, Figma, WeTransfer...)
                 </label>
                 <textarea
-                  placeholder="https://drive.google.com/...&#10;https://figma.com/...&#10;https://github.com/..."
+                  placeholder="Un lien par ligne (https://...)"
                   value={deliverableForm.fileUrlsText}
                   onChange={(e) => setDeliverableForm({ ...deliverableForm, fileUrlsText: e.target.value })}
-                  className="w-full bg-[#172033] border border-[#27354F] text-white text-xs rounded-lg p-2.5 h-20 resize-none focus:outline-none focus:border-uec-red font-mono text-[11px]"
+                  className="w-full bg-[#172033] border border-[#27354F] text-white text-xs rounded-lg p-3 min-h-[70px] resize-none font-mono"
                 />
               </div>
 
-              <div className="mt-6 pt-4 border-t border-[#1F2937] flex justify-end gap-2">
+              <div className="flex justify-end gap-2 pt-3 border-t border-[#1F2937]">
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
                   onClick={() => setSubmittingTaskId(null)}
                 >
                   Annuler
                 </Button>
-                <Button type="submit" variant="primary" size="sm" disabled={isPending}>
-                  {isPending ? "Transmission..." : "Soumettre pour Revue"}
+                <Button type="submit" variant="primary" size="sm" disabled={isPending} className="bg-uec-blue hover:bg-uec-blue/90 text-white">
+                  {isPending ? "Transmission..." : "Envoyer pour Revue"}
                 </Button>
               </div>
             </form>
           </div>
         </div>
       )}
+
+      {/* Task Detail Modal */}
+      <TaskDetailModal
+        isOpen={isDetailOpen}
+        onClose={() => setIsDetailOpen(false)}
+        task={selectedTask}
+        userRole={userRole}
+        currentUserId={currentUserId}
+        isPending={isPending}
+        onStartTask={handleStartTask}
+        onSubmitDeliverable={handleOpenSubmitDeliverable}
+        onEditTask={openEdit}
+        onDeleteTask={handleDeleteTask}
+      />
+
+      {/* Task Edit Modal */}
+      <TaskEditModal
+        isOpen={isEditOpen}
+        onClose={() => {
+          setIsEditOpen(false);
+          setEditingTask(null);
+        }}
+        task={editingTask}
+        projects={projects}
+        members={members}
+        onSuccess={(updatedTask) => {
+          setTasks((prev) => prev.map((t) => (t.id === updatedTask.id ? updatedTask : t)));
+          if (selectedTask?.id === updatedTask.id) {
+            setSelectedTask(updatedTask);
+          }
+          setFeedback({ type: "success", message: "Tâche mise à jour avec succès." });
+          setTimeout(() => setFeedback(null), 3000);
+        }}
+      />
     </div>
   );
 }
