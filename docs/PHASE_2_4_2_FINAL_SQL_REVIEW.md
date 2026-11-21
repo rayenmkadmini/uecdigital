@@ -115,7 +115,17 @@ BEGIN
   END IF;
 
   -- 8. Regular Assigned Member Rules
-  -- A. Strict Column-Level Immutability:
+  -- A. Enforce Task Assignment (Defense-in-depth against unassigned mutations)
+  IF NOT EXISTS (
+    SELECT 1 
+    FROM public.task_assignees 
+    WHERE task_id = OLD.id 
+      AND user_id = v_caller_id
+  ) THEN
+    RAISE EXCEPTION 'FORBIDDEN: Vous n''êtes pas assigné à cette tâche.';
+  END IF;
+
+  -- B. Strict Column-Level Immutability:
   -- All task definitions, scope, priorities, assignments, and boundaries are 100% immutable for members
   IF NEW.department_id IS DISTINCT FROM OLD.department_id OR
      NEW.project_id IS DISTINCT FROM OLD.project_id OR

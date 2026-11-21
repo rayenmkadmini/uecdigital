@@ -280,6 +280,17 @@ async function runRuntimeTests() {
       END IF;
 
       -- 8. Regular Assigned Member Rules
+      -- A. Enforce assignment: User must be an assigned member of this task
+      IF NOT EXISTS (
+        SELECT 1 
+        FROM public.task_assignees 
+        WHERE task_id = OLD.id 
+          AND user_id = v_caller_id
+      ) THEN
+        RAISE EXCEPTION 'FORBIDDEN: Vous n''êtes pas assigné à cette tâche.';
+      END IF;
+
+      -- B. Strict Column-Level Immutability:
       IF NEW.department_id IS DISTINCT FROM OLD.department_id OR
          NEW.project_id IS DISTINCT FROM OLD.project_id OR
          NEW.title IS DISTINCT FROM OLD.title OR
@@ -402,6 +413,17 @@ async function runRuntimeTests() {
     `UPDATE public.tasks SET status = 'IN_PROGRESS' WHERE id = '${task1Id}';`,
     false,
     "UNAUTHORIZED"
+  );
+
+  // ID-04: Authenticated user cannot claim service_role bypass without service_role claim
+  await executeTest(
+    "ID-04",
+    "Authenticated member cannot bypass trigger via spoofed claims",
+    "authenticated",
+    memberA1Id,
+    `UPDATE public.tasks SET title = 'Spoofed' WHERE id = '${task1Id}';`,
+    false,
+    "FORBIDDEN"
   );
 
   // ==============================================================================
@@ -676,6 +698,17 @@ async function runRuntimeTests() {
   );
   await db.exec(`DELETE FROM public.task_submissions WHERE task_id = '${task1Id}';`);
 
+  // MEM-24: Member cannot modify an unassigned task in another department
+  await executeTest(
+    "MEM-24",
+    "Member cannot modify task outside assignment scope (unassigned task)",
+    "authenticated",
+    memberA1Id,
+    `UPDATE public.tasks SET status = 'IN_PROGRESS' WHERE id = '${task2Id}';`,
+    false,
+    "FORBIDDEN"
+  );
+
   // ==============================================================================
   // SECTION 3: COORDINATOR RUNTIME TESTS
   // ==============================================================================
@@ -842,6 +875,93 @@ async function runRuntimeTests() {
     false,
     "FORBIDDEN"
   );
+
+  // ==============================================================================
+  // SECTION 4B: COMPLETE END-TO-END WORKFLOW LIFECYCLE WALKTHROUGH (FLOW-01..08)
+  // ==============================================================================
+  console.log("\n--- SECTION 4B: COMPLETE END-TO-END WORKFLOW LIFECYCLE WALKTHROUGH ---");
+
+  const flowTaskId = "30000000-0000-0000-0000-000000000001";
+  await setAuthContext(superAdminId, "authenticated");
+  await db.exec(`
+    INSERT INTO public.tasks (id, department_id, title, description, priority, status, created_by, coordinator_id)
+    VALUES ('${flowTaskId}', '${deptAId}', 'Cycle de vie complet', 'Test E2E', 'HIGH', 'TODO', '${coordAId}', '${coordAId}');
+    INSERT INTO public.task_assignees (task_id, user_id) VALUES ('${flowTaskId}', '${memberA1Id}');
+  `);
+
+  // FLOW-01: Member starts task: TODO -> IN_PROGRESS
+  await setAuthContext(memberA1Id, "authenticated");
+  await db.exec(`UPDATE public.tasks SET status = 'IN_PROGRESS' WHERE id = '${flowTaskId}';`);
+  const status01 = (await db.query(`SELECT status FROM public.tasks WHERE id = '${flowTaskId}';`)).rows[0].status;
+  recordResult("FLOW-01", "Step 1: Member moves TODO -> IN_PROGRESS", "MEMBER", "UPDATE ... status = 'IN_PROGRESS'", "IN_PROGRESS", status01, status01 === "IN_PROGRESS");
+
+  // FLOW-02: Member deposits deliverable and transitions to COORDINATOR_REVIEW
+  await db.exec(`
+    INSERT INTO public.task_submissions (task_id, submitted_by, title, description, status)
+    VALUES ('${flowTaskId}', '${memberA1Id}', 'Livrable Final', 'Code complet', 'PENDING_COORDINATOR');
+  `);
+  await db.exec(`UPDATE public.tasks SET status = 'COORDINATOR_REVIEW' WHERE id = '${flowTaskId}';`);
+  const status02 = (await db.query(`SELECT status FROM public.tasks WHERE id = '${flowTaskId}';`)).rows[0].status;
+  recordResult("FLOW-02", "Step 2: Member submits deliverable -> COORDINATOR_REVIEW", "MEMBER", "UPDATE ... status = 'COORDINATOR_REVIEW'", "COORDINATOR_REVIEW", status02, status02 === "COORDINATOR_REVIEW");
+
+  // FLOW-03: Member is now locked out during review
+  let memberBlocked = false;
+  try {
+    await db.exec(`UPDATE public.tasks SET title = 'Trying to edit' WHERE id = '${flowTaskId}';`);
+  } catch (err) {
+    memberBlocked = err.message.includes("FORBIDDEN");
+  }
+  recordResult("FLOW-03", "Step 3: Member is locked out during review", "MEMBER", "UPDATE ... title = ...", "FORBIDDEN", memberBlocked ? "FORBIDDEN" : "MUTATED", memberBlocked);
+
+  // FLOW-04: Coordinator reviews and promotes to SUPER_ADMIN_APPROVAL
+  await setAuthContext(coordAId, "authenticated");
+  await db.exec(`
+    UPDATE public.task_submissions SET status = 'PENDING_SUPER_ADMIN' WHERE task_id = '${flowTaskId}';
+    UPDATE public.tasks SET status = 'SUPER_ADMIN_APPROVAL' WHERE id = '${flowTaskId}';
+  `);
+  const status04 = (await db.query(`SELECT status FROM public.tasks WHERE id = '${flowTaskId}';`)).rows[0].status;
+  recordResult("FLOW-04", "Step 4: Coordinator promotes to SUPER_ADMIN_APPROVAL", "COORDINATOR", "UPDATE ... status = 'SUPER_ADMIN_APPROVAL'", "SUPER_ADMIN_APPROVAL", status04, status04 === "SUPER_ADMIN_APPROVAL");
+
+  // FLOW-05: Coordinator cannot modify task in SUPER_ADMIN_APPROVAL
+  let coordBlocked = false;
+  try {
+    await db.exec(`UPDATE public.tasks SET priority = 'LOW' WHERE id = '${flowTaskId}';`);
+  } catch (err) {
+    coordBlocked = err.message.includes("FORBIDDEN");
+  }
+  recordResult("FLOW-05", "Step 5: Coordinator locked out while in SUPER_ADMIN_APPROVAL", "COORDINATOR", "UPDATE ... priority = 'LOW'", "FORBIDDEN", coordBlocked ? "FORBIDDEN" : "MUTATED", coordBlocked);
+
+  // FLOW-06: Super Admin grants final approval -> APPROVED
+  await setAuthContext(superAdminId, "authenticated");
+  await db.exec(`
+    UPDATE public.task_submissions SET status = 'APPROVED', is_locked = true WHERE task_id = '${flowTaskId}';
+    UPDATE public.tasks SET status = 'APPROVED' WHERE id = '${flowTaskId}';
+  `);
+  const status06 = (await db.query(`SELECT status FROM public.tasks WHERE id = '${flowTaskId}';`)).rows[0].status;
+  recordResult("FLOW-06", "Step 6: Super Admin approves task -> APPROVED", "SUPER_ADMIN", "UPDATE ... status = 'APPROVED'", "APPROVED", status06, status06 === "APPROVED");
+
+  // FLOW-07: Coordinator cannot modify APPROVED task
+  await setAuthContext(coordAId, "authenticated");
+  let coordApprovedBlocked = false;
+  try {
+    await db.exec(`UPDATE public.tasks SET title = 'Altering Approved' WHERE id = '${flowTaskId}';`);
+  } catch (err) {
+    coordApprovedBlocked = err.message.includes("FORBIDDEN");
+  }
+  recordResult("FLOW-07", "Step 7: Coordinator cannot alter APPROVED task", "COORDINATOR", "UPDATE ... title = ...", "FORBIDDEN", coordApprovedBlocked ? "FORBIDDEN" : "MUTATED", coordApprovedBlocked);
+
+  // FLOW-08: Super Admin marks task DONE
+  await setAuthContext(superAdminId, "authenticated");
+  await db.exec(`UPDATE public.tasks SET status = 'DONE' WHERE id = '${flowTaskId}';`);
+  const status08 = (await db.query(`SELECT status FROM public.tasks WHERE id = '${flowTaskId}';`)).rows[0].status;
+  recordResult("FLOW-08", "Step 8: Super Admin closes task -> DONE", "SUPER_ADMIN", "UPDATE ... status = 'DONE'", "DONE", status08, status08 === "DONE");
+
+  // Cleanup flow task
+  await db.exec(`
+    DELETE FROM public.task_submissions WHERE task_id = '${flowTaskId}';
+    DELETE FROM public.task_assignees WHERE task_id = '${flowTaskId}';
+    DELETE FROM public.tasks WHERE id = '${flowTaskId}';
+  `);
 
   // ==============================================================================
   // SECTION 5: TRIGGER CHAIN & UPDATED_AT BEHAVIOR

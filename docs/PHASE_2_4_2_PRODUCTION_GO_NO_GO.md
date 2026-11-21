@@ -17,9 +17,9 @@ Per the Phase 2.4.2 charter, evidence is strictly categorized across four tiers:
 
 ### Tier 1: Isolated PostgreSQL Runtime Tests (Highest Evidence)
 - **Engine:** Real PostgreSQL core engine running via PGlite (Wasm / PostgreSQL 18.7 engine).
-- **Execution:** 44 individual transactions executed (`BEGIN ... ROLLBACK`).
-- **Results:** **44/44 PASS (100%)**.
-- **Scope Covered:** Member column immutability, Coordinator departmental confinement, Super Admin authority, state transitions, deliverable checks, trigger ordering, sub-second rollback, and re-application idempotency.
+- **Execution:** 54 individual transactions executed (`BEGIN ... ROLLBACK`).
+- **Results:** **54/54 PASS (100%)**.
+- **Scope Covered:** Member column immutability (14 columns), Task assignment check, Coordinator departmental confinement, Super Admin authority, state transitions, deliverable checks, trigger ordering, complete 8-step end-to-end lifecycle walkthrough (`FLOW-01`..`08`), sub-second rollback, and re-application idempotency.
 
 ### Tier 2: Production Read-Only Observations (Live Baseline)
 - **Supabase Instance:** `aigsdarfiplwmzqtqlxh` (PostgreSQL 17.12).
@@ -59,7 +59,7 @@ Per the Phase 2.4.2 charter, evidence is strictly categorized across four tiers:
 
 | Gate | Tool / Command | Target Threshold | Actual Result | Status |
 |---|---|:---:|:---:|:---:|
-| **Isolated PostgreSQL Tests** | `node scripts/test-phase242-isolated.mjs` | 100% pass | **44/44 PASS** | ✅ PASS |
+| **Isolated PostgreSQL Tests** | `node scripts/test-phase242-isolated.mjs` | 100% pass | **54/54 PASS** | ✅ PASS |
 | **TypeScript Validation** | `npx tsc --noEmit` | 0 errors | **0 errors** | ✅ PASS |
 | **ESLint Static Analysis** | `npm run lint` | 0 errors / 0 warnings | **0 errors / 0 warnings** | ✅ PASS |
 | **Next.js Production Build** | `npm run build` | 21 routes valid | **21/21 routes generated** | ✅ PASS |
