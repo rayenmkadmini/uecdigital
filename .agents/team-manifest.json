@@ -1,0 +1,112 @@
+{
+  "project": "UEC Espace Digital",
+  "organization": "Union des Étudiants Clubistes",
+  "version": "1.0.0",
+  "orchestrator": "uec-chief-orchestrator",
+  "agents": [
+    {
+      "id": "uec-chief-orchestrator",
+      "name": "Chief Orchestrator",
+      "role": "Project Director & Engineering Manager",
+      "configPath": ".agents/agents/uec-chief-orchestrator/agent.md",
+      "canDelegate": true,
+      "canWriteCode": true,
+      "canExecuteCommands": true
+    },
+    {
+      "id": "uec-software-architect",
+      "name": "Software Architect",
+      "role": "System Architecture & Code Standards",
+      "configPath": ".agents/agents/uec-software-architect/agent.md",
+      "canDelegate": false,
+      "canWriteCode": true,
+      "canExecuteCommands": true
+    },
+    {
+      "id": "uec-frontend-engineer",
+      "name": "Frontend Engineer",
+      "role": "Next.js UI & Client Components",
+      "configPath": ".agents/agents/uec-frontend-engineer/agent.md",
+      "canDelegate": false,
+      "canWriteCode": true,
+      "canExecuteCommands": true
+    },
+    {
+      "id": "uec-uiux-designer",
+      "name": "UI/UX Designer",
+      "role": "Design System & Responsive/RTL Ergonomics",
+      "configPath": ".agents/agents/uec-uiux-designer/agent.md",
+      "canDelegate": false,
+      "canWriteCode": true,
+      "canExecuteCommands": true
+    },
+    {
+      "id": "uec-backend-engineer",
+      "name": "Backend Engineer",
+      "role": "Server Actions, Zod & Supabase Integration",
+      "configPath": ".agents/agents/uec-backend-engineer/agent.md",
+      "canDelegate": false,
+      "canWriteCode": true,
+      "canExecuteCommands": true
+    },
+    {
+      "id": "uec-database-engineer",
+      "name": "Database & Supabase Engineer",
+      "role": "PostgreSQL 17, RLS & Schema Migrations",
+      "configPath": ".agents/agents/uec-database-engineer/agent.md",
+      "canDelegate": false,
+      "canWriteCode": true,
+      "canExecuteCommands": true
+    },
+    {
+      "id": "uec-security-engineer",
+      "name": "Security Engineer",
+      "role": "RBAC, 2-Tier Approvals & Attack Surface Audits",
+      "configPath": ".agents/agents/uec-security-engineer/agent.md",
+      "canDelegate": false,
+      "canWriteCode": true,
+      "canExecuteCommands": true
+    },
+    {
+      "id": "uec-qa-engineer",
+      "name": "QA & Automation Engineer",
+      "role": "Test Suites, Lint, Build & Quality Gates",
+      "configPath": ".agents/agents/uec-qa-engineer/agent.md",
+      "canDelegate": false,
+      "canWriteCode": true,
+      "canExecuteCommands": true
+    },
+    {
+      "id": "uec-i18n-a11y-engineer",
+      "name": "i18n & Accessibility Engineer",
+      "role": "Trilingual Parity (FR/AR/EN), RTL & WCAG",
+      "configPath": ".agents/agents/uec-i18n-a11y-engineer/agent.md",
+      "canDelegate": false,
+      "canWriteCode": true,
+      "canExecuteCommands": true
+    },
+    {
+      "id": "uec-devops-engineer",
+      "name": "DevOps & Release Engineer",
+      "role": "Next.js Build Optimization, Git & Containers",
+      "configPath": ".agents/agents/uec-devops-engineer/agent.md",
+      "canDelegate": false,
+      "canWriteCode": true,
+      "canExecuteCommands": true
+    },
+    {
+      "id": "uec-docs-product-engineer",
+      "name": "Documentation & Product Engineer",
+      "role": "Technical Docs, Product Specs & Architecture Guides",
+      "configPath": ".agents/agents/uec-docs-product-engineer/agent.md",
+      "canDelegate": false,
+      "canWriteCode": true,
+      "canExecuteCommands": true
+    }
+  ],
+  "globalSafety": {
+    "productionDatabaseReadOnly": true,
+    "gitPushAutonomousAllowed": false,
+    "vercelDeployAutonomousAllowed": false
+  }
+}
