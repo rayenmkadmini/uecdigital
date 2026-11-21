@@ -1,9 +1,10 @@
 # UEC ESPACE DIGITAL — RLS POLICY BEFORE & AFTER
-## Detailed Policy Definition Comparison & Column Scoping Analysis
+## Detailed Policy Definition Comparison & Live Catalog Verification
 
-**Supabase Target:** `aigsdarfiplwmzqtqlxh` (PostgreSQL 17.12)  
+**Supabase Target:** `aigsdarfiplwmzqtqlxh` (PostgreSQL 17.12, region `eu-west-1`)  
+**Execution Timestamp:** `2026-11-21T11:32:46Z` (`12:32:46+01:00`)  
 **Document Ref:** Phase 2.2 Schema Hardening  
-**Status:** READY FOR EXPLICIT APPROVAL
+**Status:** **APPLIED & VERIFIED IN LIVE CATALOG**
 
 ---
 
@@ -11,7 +12,7 @@
 
 #### Live Catalog Definition (BEFORE)
 ```sql
--- Stored in pg_policies.qual:
+-- Stored in pg_policies.qual (BEFORE):
 (
   private.is_super_admin(auth.uid()) OR 
   private.is_coordinator_of(department_id, auth.uid()) OR 
@@ -21,26 +22,21 @@
   ))
 )
 ```
+*Exact Flaw:* `pm.project_id = pm.id` was comparing foreign key to primary key of the same subquery table, blocking assigned members from reading their projects.
 
-#### Exact Flaw
-In `WHERE pm.project_id = id`, PostgreSQL resolves `id` as `pm.id` (primary key of `project_members`).
-Because `pm.project_id` and `pm.id` are separate UUIDs, `pm.project_id = pm.id` is false.
-**Impact:** A member assigned to a project in `project_members` cannot read the project via direct PostgREST SELECT queries.
-
-#### Corrected Definition (AFTER)
+#### Live Catalog Definition (AFTER — VERIFIED)
 ```sql
-DROP POLICY IF EXISTS "projects_select" ON public.projects;
-CREATE POLICY "projects_select" ON public.projects
-FOR SELECT TO authenticated
-USING (
-  private.is_super_admin(auth.uid()) OR
-  private.is_coordinator_of(projects.department_id, auth.uid()) OR
-  EXISTS (
-    SELECT 1 FROM public.project_members pm
-    WHERE pm.project_id = projects.id AND pm.user_id = auth.uid()
-  )
-);
+-- Stored in pg_policies.qual (LIVE):
+(
+  private.is_super_admin(( SELECT auth.uid() AS uid)) OR 
+  private.is_coordinator_of(department_id, ( SELECT auth.uid() AS uid)) OR 
+  (EXISTS (
+    SELECT 1 FROM project_members pm 
+    WHERE ((pm.project_id = projects.id) AND (pm.user_id = ( SELECT auth.uid() AS uid)))
+  ))
+)
 ```
+*Resolution:* Qualified outer-table reference `pm.project_id = projects.id` restores member read access. Replaced bare `auth.uid()` with `(select auth.uid())` per Supabase initPlan optimization.
 
 ---
 
@@ -48,7 +44,7 @@ USING (
 
 #### Live Catalog Definition (BEFORE)
 ```sql
--- Stored in pg_policies.qual:
+-- Stored in pg_policies.qual (BEFORE):
 (
   private.is_super_admin(auth.uid()) OR 
   private.is_coordinator_of(department_id, auth.uid()) OR 
@@ -58,33 +54,29 @@ USING (
   ))
 )
 ```
+*Exact Flaw:* `ta.task_id = ta.id` blocked assigned members from viewing their assigned tasks.
 
-#### Exact Flaw
-`ta.task_id = id` resolves as `ta.task_id = ta.id`.
-**Impact:** Assigned members cannot view their own tasks via direct PostgREST SELECT queries.
-
-#### Corrected Definition (AFTER)
+#### Live Catalog Definition (AFTER — VERIFIED)
 ```sql
-DROP POLICY IF EXISTS "tasks_select" ON public.tasks;
-CREATE POLICY "tasks_select" ON public.tasks
-FOR SELECT TO authenticated
-USING (
-  private.is_super_admin(auth.uid()) OR
-  private.is_coordinator_of(tasks.department_id, auth.uid()) OR
-  EXISTS (
-    SELECT 1 FROM public.task_assignees ta
-    WHERE ta.task_id = tasks.id AND ta.user_id = auth.uid()
-  )
-);
+-- Stored in pg_policies.qual (LIVE):
+(
+  private.is_super_admin(( SELECT auth.uid() AS uid)) OR 
+  private.is_coordinator_of(department_id, ( SELECT auth.uid() AS uid)) OR 
+  (EXISTS (
+    SELECT 1 FROM task_assignees ta 
+    WHERE ((ta.task_id = tasks.id) AND (ta.user_id = ( SELECT auth.uid() AS uid)))
+  ))
+)
 ```
+*Resolution:* Qualified outer-table reference `ta.task_id = tasks.id` restores member task visibility.
 
 ---
 
-### 3. `public.tasks` — `tasks_update` & Column-Level Security
+### 3. `public.tasks` — `tasks_update`
 
 #### Live Catalog Definition (BEFORE)
 ```sql
--- Stored in pg_policies.qual & with_check:
+-- Stored in pg_policies.qual & with_check (BEFORE):
 (
   private.is_super_admin(auth.uid()) OR 
   private.is_coordinator_of(department_id, auth.uid()) OR 
@@ -94,38 +86,21 @@ USING (
   ))
 )
 ```
+*Exact Flaw:* `ta.task_id = ta.id` prevented members from updating task status (e.g. `TODO` -> `IN_PROGRESS`).
 
-#### Exact Flaw
-`ta.task_id = id` resolves as `ta.task_id = ta.id`.
-**Impact:** Assigned members cannot update task status (e.g. `TODO` -> `IN_PROGRESS`) via direct PostgREST UPDATE queries.
-
-#### Corrected Definition (AFTER)
+#### Live Catalog Definition (AFTER — VERIFIED)
 ```sql
-DROP POLICY IF EXISTS "tasks_update" ON public.tasks;
-CREATE POLICY "tasks_update" ON public.tasks
-FOR UPDATE TO authenticated
-USING (
-  private.is_super_admin(auth.uid()) OR
-  private.is_coordinator_of(tasks.department_id, auth.uid()) OR
-  EXISTS (
-    SELECT 1 FROM public.task_assignees ta
-    WHERE ta.task_id = tasks.id AND ta.user_id = auth.uid()
-  )
+-- Stored in pg_policies.qual & with_check (LIVE):
+(
+  private.is_super_admin(( SELECT auth.uid() AS uid)) OR 
+  private.is_coordinator_of(department_id, ( SELECT auth.uid() AS uid)) OR 
+  (EXISTS (
+    SELECT 1 FROM task_assignees ta 
+    WHERE ((ta.task_id = tasks.id) AND (ta.user_id = ( SELECT auth.uid() AS uid)))
+  ))
 )
-WITH CHECK (
-  private.is_super_admin(auth.uid()) OR
-  private.is_coordinator_of(tasks.department_id, auth.uid()) OR
-  EXISTS (
-    SELECT 1 FROM public.task_assignees ta
-    WHERE ta.task_id = tasks.id AND ta.user_id = auth.uid()
-  )
-);
 ```
-
-#### Column-Level Security Evaluation
-- PostgreSQL RLS policies evaluate row access, not column modifications.
-- At application level, Server Action `updateTaskStatusAction` (`app/actions/tasks.ts`) restricts members strictly to `{ status: 'TODO' | 'IN_PROGRESS' }` and rejects updates if the task is in any review or locked state.
-- For defense-in-depth against direct REST API tampering, a PostgreSQL `BEFORE UPDATE` trigger (`private.enforce_task_member_immutability`) is proposed to make `department_id`, `project_id`, `created_by`, `coordinator_id`, and `priority` immutable for non-coordinators/non-admins.
+*Resolution:* Qualified outer-table reference `ta.task_id = tasks.id` in both `USING` and `WITH CHECK`.
 
 ---
 
@@ -133,7 +108,7 @@ WITH CHECK (
 
 #### Live Catalog Definition (BEFORE)
 ```sql
--- Stored in pg_policies.with_check:
+-- Stored in pg_policies.with_check (BEFORE):
 (
   (submitted_by = auth.uid()) AND 
   (EXISTS (
@@ -142,33 +117,23 @@ WITH CHECK (
   ))
 )
 ```
+*Exact Flaw:* `ta.task_id = ta.task_id` was a tautology, allowing any user with any assigned task to insert submissions into any task system-wide.
 
-#### Exact Flaw
-`ta.task_id = task_id` resolves as `ta.task_id = ta.task_id`.
-Because `ta.task_id = ta.task_id` is always true, the check only asks: *"Does `auth.uid()` have any task assigned anywhere in the database?"*
-**Security Vulnerability:** A member in Department A assigned to Task 1 can insert a fake or unauthorized submission into Task 99 in Department B!
-
-#### Corrected & Narrowed Definition (AFTER)
+#### Live Catalog Definition (AFTER — VERIFIED)
 ```sql
-DROP POLICY IF EXISTS "submissions_insert" ON public.task_submissions;
-CREATE POLICY "submissions_insert" ON public.task_submissions
-FOR INSERT TO authenticated
-WITH CHECK (
-  submitted_by = auth.uid() AND (
-    EXISTS (
-      SELECT 1 FROM public.task_assignees ta
-      WHERE ta.task_id = task_submissions.task_id AND ta.user_id = auth.uid()
-    ) OR
-    private.is_super_admin(auth.uid())
+-- Stored in pg_policies.with_check (LIVE):
+(
+  (submitted_by = ( SELECT auth.uid() AS uid)) AND 
+  (
+    (EXISTS (
+      SELECT 1 FROM task_assignees ta 
+      WHERE ((ta.task_id = task_submissions.task_id) AND (ta.user_id = ( SELECT auth.uid() AS uid)))
+    )) OR 
+    private.is_super_admin(( SELECT auth.uid() AS uid))
   )
-);
+)
 ```
-
-#### Business Rule Validation
-1. **Assigned Members Only:** A member can ONLY submit deliverables for tasks where an explicit assignment exists in `task_assignees` for `task_submissions.task_id`.
-2. **Coordinators Excluded From Submitting On Behalf of Members:** Coordinators cannot submit deliverables for a task unless they themselves are an assigned member (`task_assignees`) or Super Admin.
-3. **No Impersonation:** `submitted_by = auth.uid()` is strictly mandatory.
-4. **Super Admin Parity:** Super Admins can submit or ingest deliverables system-wide.
+*Resolution:* Outer-table correlation `ta.task_id = task_submissions.task_id` eliminates the tautology. Narrowed to assigned members and Super Admin only, preventing coordinators from submitting on behalf of members.
 
 ---
 
@@ -176,7 +141,7 @@ WITH CHECK (
 
 #### Live Catalog Definition (BEFORE)
 ```sql
--- Stored in pg_policies.qual:
+-- Stored in pg_policies.qual (BEFORE):
 (
   private.is_super_admin(auth.uid()) OR 
   (created_by = auth.uid()) OR 
@@ -187,23 +152,19 @@ WITH CHECK (
   ))
 )
 ```
+*Exact Flaw:* `ma.meeting_id = ma.id` prevented attendees from viewing cross-department meetings.
 
-#### Exact Flaw
-`ma.meeting_id = id` resolves as `ma.meeting_id = ma.id`.
-**Impact:** Cross-department meeting invitees who are listed in `meeting_attendees` cannot view the meeting record via direct PostgREST SELECT queries.
-
-#### Corrected Definition (AFTER)
+#### Live Catalog Definition (AFTER — VERIFIED)
 ```sql
-DROP POLICY IF EXISTS "meetings_select" ON public.meetings;
-CREATE POLICY "meetings_select" ON public.meetings
-FOR SELECT TO authenticated
-USING (
-  private.is_super_admin(auth.uid()) OR
-  created_by = auth.uid() OR
-  (department_id IS NOT NULL AND private.is_member_of_department(department_id, auth.uid())) OR
-  EXISTS (
-    SELECT 1 FROM public.meeting_attendees ma
-    WHERE ma.meeting_id = meetings.id AND ma.user_id = auth.uid()
-  )
-);
+-- Stored in pg_policies.qual (LIVE):
+(
+  private.is_super_admin(( SELECT auth.uid() AS uid)) OR 
+  (created_by = ( SELECT auth.uid() AS uid)) OR 
+  ((department_id IS NOT NULL) AND private.is_member_of_department(department_id, ( SELECT auth.uid() AS uid))) OR 
+  (EXISTS (
+    SELECT 1 FROM meeting_attendees ma 
+    WHERE ((ma.meeting_id = meetings.id) AND (ma.user_id = ( SELECT auth.uid() AS uid)))
+  ))
+)
 ```
+*Resolution:* Qualified outer-table reference `ma.meeting_id = meetings.id` restores attendee visibility.
