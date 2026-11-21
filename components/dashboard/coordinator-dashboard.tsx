@@ -3,7 +3,6 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { useTranslation } from "@/lib/i18n/context";
-import { useAuth } from "@/lib/auth/auth-context";
 import { StatCard } from "@/components/ui/stat-card";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,67 +13,80 @@ import {
   Users,
   CheckSquare,
   Clock,
-  ArrowRight,
   Send,
   RotateCcw,
   CheckCircle2,
   AlertCircle,
   FileText,
 } from "lucide-react";
+import type { CoordinatorDashboardData } from "@/lib/data/dashboard";
+import { submitCoordinatorReview } from "@/app/actions/approvals";
 
-interface TeamDeliverable {
-  id: string;
-  taskTitle: string;
-  assignee: string;
-  submittedAt: string;
-  version: number;
-  description: string;
+interface CoordinatorDashboardProps {
+  data: CoordinatorDashboardData;
 }
 
-const MOCK_TEAM_SUBMISSIONS: TeamDeliverable[] = [
-  {
-    id: "sub-201",
-    taskTitle: "Pack Visuel Réseaux — Victoire CA vs ESS",
-    assignee: "Yassine Ayari",
-    submittedAt: "Il y a 45 min",
-    version: 1,
-    description: "Format 1080x1350 et Stories Instagram avec la charte officielle UEC.",
-  },
-  {
-    id: "sub-202",
-    taskTitle: "Bannière Officielle Site Web 2026",
-    assignee: "Mariem Cherif",
-    submittedAt: "Il y a 3 heures",
-    version: 2,
-    description: "Correction des marges et intégration de la nouvelle typographie UEC.",
-  },
-];
-
-const MOCK_TEAM_MEMBERS = [
-  { name: "Yassine Ayari", role: "Graphiste Senior", activeTasks: 3, avatar: null },
-  { name: "Mariem Cherif", role: "UI Designer", activeTasks: 2, avatar: null },
-  { name: "Selim Mansour", role: "Illustrateur", activeTasks: 1, avatar: null },
-  { name: "Amira Jaziri", role: "Motion Designer", activeTasks: 2, avatar: null },
-];
-
-export function CoordinatorDashboard() {
+export function CoordinatorDashboard({ data }: CoordinatorDashboardProps) {
   const { t } = useTranslation();
-  const { profile } = useAuth();
-  const [submissions, setSubmissions] = useState<TeamDeliverable[]>(MOCK_TEAM_SUBMISSIONS);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [submissions, setSubmissions] = useState(data.teamSubmissions);
+  const [notice, setNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [isProcessing, setIsProcessing] = useState<string | null>(null);
 
-  const deptName = profile?.department_name || "Pôle Créatif & Design";
+  const handleForwardToSuperAdmin = async (id: string, title: string) => {
+    setIsProcessing(id);
+    setNotice(null);
+    try {
+      const notes = window.prompt(
+        "Notes de revue technique pour le Super Admin :",
+        "Conformité technique et graphique vérifiée. Prêt pour validation finale."
+      );
+      if (!notes) {
+        setIsProcessing(null);
+        return;
+      }
 
-  const handleForwardToSuperAdmin = (id: string, title: string) => {
-    setSubmissions(submissions.filter((s) => s.id !== id));
-    setNotice(`Livrable "${title}" validé par le coordinateur et transmis au Super Admin pour validation finale.`);
-    setTimeout(() => setNotice(null), 5000);
+      const res = await submitCoordinatorReview(id, "SUBMIT_TO_SUPER_ADMIN", notes);
+      if (res.success) {
+        setSubmissions((prev) => prev.filter((s) => s.id !== id));
+        setNotice({
+          type: "success",
+          message: `Livrable "${title}" validé par le coordinateur et transmis au Super Admin.`,
+        });
+      } else {
+        setNotice({ type: "error", message: res.message });
+      }
+    } catch (err: any) {
+      setNotice({ type: "error", message: err.message || "Erreur de transmission" });
+    } finally {
+      setIsProcessing(null);
+    }
   };
 
-  const handleRequestRevision = (id: string, title: string) => {
-    setSubmissions(submissions.filter((s) => s.id !== id));
-    setNotice(`Demande de retouche renvoyée au membre pour "${title}".`);
-    setTimeout(() => setNotice(null), 5000);
+  const handleRequestRevision = async (id: string, title: string) => {
+    setIsProcessing(id);
+    setNotice(null);
+    try {
+      const notes = window.prompt("Instructions de retouche pour le membre :", "Retouches nécessaires sur les formats.");
+      if (!notes) {
+        setIsProcessing(null);
+        return;
+      }
+
+      const res = await submitCoordinatorReview(id, "REQUEST_REVISION", notes);
+      if (res.success) {
+        setSubmissions((prev) => prev.filter((s) => s.id !== id));
+        setNotice({
+          type: "success",
+          message: `Demande de retouche renvoyée au membre pour "${title}".`,
+        });
+      } else {
+        setNotice({ type: "error", message: res.message });
+      }
+    } catch (err: any) {
+      setNotice({ type: "error", message: err.message || "Erreur de demande de retouche" });
+    } finally {
+      setIsProcessing(null);
+    }
   };
 
   return (
@@ -84,14 +96,14 @@ export function CoordinatorDashboard() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl lg:text-3xl font-extrabold text-white tracking-tight">
-              Espace Coordinateur — {deptName}
+              Espace Coordinateur — {data.departmentName} ({data.departmentCode})
             </h1>
             <Badge variant="coordinator" size="md">
               PILOTAGE ÉQUIPE
             </Badge>
           </div>
           <p className="text-sm text-slate-400 mt-1">
-            Gestion des membres de votre pôle, assignation des tâches et première revue des livrables.
+            Gestion des membres de votre pôle, assignation des tâches et première revue de conformité.
           </p>
         </div>
 
@@ -106,12 +118,22 @@ export function CoordinatorDashboard() {
       </div>
 
       {notice && (
-        <div className="p-3.5 rounded-xl bg-blue-950/70 border border-blue-700 text-xs text-blue-200 flex items-center justify-between shadow-lg">
+        <div
+          className={`p-3.5 rounded-xl border text-xs flex items-center justify-between shadow-lg ${
+            notice.type === "success"
+              ? "bg-blue-950/70 border-blue-700 text-blue-200"
+              : "bg-red-950/70 border-red-700 text-red-200"
+          }`}
+        >
           <div className="flex items-center gap-2">
-            <CheckCircle2 size={16} className="text-blue-400 shrink-0" />
-            <span>{notice}</span>
+            {notice.type === "success" ? (
+              <CheckCircle2 size={16} className="text-blue-400 shrink-0" />
+            ) : (
+              <AlertCircle size={16} className="text-red-400 shrink-0" />
+            )}
+            <span>{notice.message}</span>
           </div>
-          <button onClick={() => setNotice(null)} className="text-blue-400 hover:text-white">
+          <button onClick={() => setNotice(null)} className="text-slate-400 hover:text-white">
             ✕
           </button>
         </div>
@@ -121,17 +143,17 @@ export function CoordinatorDashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="Membres du Pôle"
-          value={MOCK_TEAM_MEMBERS.length}
-          description="Actifs et mobilisés"
+          value={data.memberCount}
+          description="Affectés à ce pôle"
           icon={<Users size={20} />}
           accentColor="blue"
         />
 
         <StatCard
-          title="Tâches en Cours"
-          value="8"
-          description="Réparties dans l'équipe"
-          icon={<CheckSquare size={20} />}
+          title="Projets du Pôle"
+          value={data.activeProjectCount}
+          description="En cours ou planifiés"
+          icon={<FolderKanban size={20} />}
           accentColor="cyan"
         />
 
@@ -145,10 +167,9 @@ export function CoordinatorDashboard() {
         />
 
         <StatCard
-          title="Taux de Validation"
-          value="92%"
-          description="Approbation finale Super Admin"
-          trend={{ value: "+4%", isPositive: true }}
+          title="Statut Département"
+          value="Opérationnel"
+          description="PostgreSQL vérifié"
           icon={<CheckCircle2 size={20} />}
           accentColor="green"
         />
@@ -174,6 +195,7 @@ export function CoordinatorDashboard() {
             <div className="py-12 text-center text-slate-400">
               <CheckCircle2 size={36} className="text-blue-400 mx-auto mb-2 opacity-80" />
               <p className="text-sm font-medium">Aucun livrable en attente de revue d'équipe.</p>
+              <p className="text-xs text-slate-400 mt-1">Tous les livrables de votre pôle sont à jour.</p>
             </div>
           ) : (
             <div className="divide-y divide-[#1F2937]">
@@ -191,7 +213,7 @@ export function CoordinatorDashboard() {
                     </div>
                     <p className="text-xs text-slate-300">{sub.description}</p>
                     <div className="flex items-center gap-3 text-xs text-slate-400 pt-1">
-                      <span>Créateur : <strong className="text-slate-300">{sub.assignee}</strong></span>
+                      <span>Auteur : <strong className="text-slate-300">{sub.assignee}</strong></span>
                       <span>•</span>
                       <span className="flex items-center gap-1">
                         <Clock size={12} /> {sub.submittedAt}
@@ -203,6 +225,7 @@ export function CoordinatorDashboard() {
                     <Button
                       variant="outline"
                       size="sm"
+                      disabled={isProcessing === sub.id}
                       onClick={() => handleRequestRevision(sub.id, sub.taskTitle)}
                       className="text-amber-300 hover:text-amber-200 border-amber-800/60 text-xs"
                     >
@@ -212,11 +235,12 @@ export function CoordinatorDashboard() {
                     <Button
                       variant="primary"
                       size="sm"
+                      disabled={isProcessing === sub.id}
                       onClick={() => handleForwardToSuperAdmin(sub.id, sub.taskTitle)}
                       className="bg-uec-blue hover:bg-uec-blueHover text-xs"
                     >
                       <Send size={14} className="mr-1" />
-                      Transmettre au Super Admin
+                      {isProcessing === sub.id ? "Envoi..." : "Transmettre au Super Admin"}
                     </Button>
                   </div>
                 </div>
@@ -232,64 +256,61 @@ export function CoordinatorDashboard() {
           <CardHeader>
             <CardTitle className="text-white flex items-center gap-2">
               <Users size={18} className="text-uec-cyan" />
-              <span>Composition de l'Équipe</span>
+              <span>Composition de l'Équipe ({data.teamMembers.length})</span>
             </CardTitle>
             <CardDescription className="text-slate-400">
-              Charge de travail actuelle par membre
+              Membres rattachés à votre pôle dans la base de données
             </CardDescription>
           </CardHeader>
           <CardContent className="p-0">
-            <div className="divide-y divide-[#1F2937]">
-              {MOCK_TEAM_MEMBERS.map((member) => (
-                <div key={member.name} className="p-4 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <Avatar name={member.name} size="sm" />
-                    <div>
-                      <p className="text-xs font-bold text-white">{member.name}</p>
-                      <p className="text-[11px] text-slate-400">{member.role}</p>
+            {data.teamMembers.length === 0 ? (
+              <div className="p-6 text-center text-xs text-slate-400">
+                Aucun membre assigné à ce pôle actuellement.
+              </div>
+            ) : (
+              <div className="divide-y divide-[#1F2937]">
+                {data.teamMembers.map((member) => (
+                  <div key={member.id} className="p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Avatar name={member.name} size="sm" />
+                      <div>
+                        <p className="text-xs font-bold text-white">{member.name}</p>
+                        <p className="text-[11px] text-slate-400">{member.email}</p>
+                      </div>
                     </div>
+                    <Badge variant="member" size="sm">
+                      {member.activeTaskCount} tâches actives
+                    </Badge>
                   </div>
-                  <Badge variant="member" size="sm">
-                    {member.activeTasks} tâches actives
-                  </Badge>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 
-        {/* Projets Actifs du Département */}
+        {/* Info Box */}
         <Card>
           <CardHeader>
             <CardTitle className="text-white flex items-center gap-2">
               <FolderKanban size={18} className="text-uec-red" />
-              <span>Projets Opérationnels du Pôle</span>
+              <span>Gouvernance & Procédures de Pôle</span>
             </CardTitle>
             <CardDescription className="text-slate-400">
-              Objectifs en cours dans votre spécialité
+              Rappels opérationnels pour le rôle Coordinateur
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="p-3.5 rounded-lg bg-[#172033] border border-[#27354F] space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-white">Campagne Visuelle Derby 2026</span>
-                <Badge variant="red" size="sm">Priorité Haute</Badge>
-              </div>
-              <div className="w-full h-1.5 rounded-full bg-slate-800">
-                <div className="h-full bg-uec-red rounded-full" style={{ width: "85%" }} />
-              </div>
-              <p className="text-[11px] text-slate-400">4 sur 5 livrables finalisés</p>
+          <CardContent className="space-y-3 text-xs text-slate-300">
+            <div className="p-3.5 rounded-lg bg-[#172033] border border-[#27354F] space-y-1">
+              <p className="font-semibold text-white">1. Attribution des tâches</p>
+              <p className="text-slate-400">
+                Créez les tâches pour votre pôle dans le module Tâches en précisant les critères d'acceptation stricts.
+              </p>
             </div>
-
-            <div className="p-3.5 rounded-lg bg-[#172033] border border-[#27354F] space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-white">Charte Graphique Espace Digital</span>
-                <Badge variant="approved" size="sm">90% Achevé</Badge>
-              </div>
-              <div className="w-full h-1.5 rounded-full bg-slate-800">
-                <div className="h-full bg-emerald-500 rounded-full" style={{ width: "90%" }} />
-              </div>
-              <p className="text-[11px] text-slate-400">Finalisation des tokens et icons</p>
+            <div className="p-3.5 rounded-lg bg-[#172033] border border-[#27354F] space-y-1">
+              <p className="font-semibold text-white">2. Revue de conformité</p>
+              <p className="text-slate-400">
+                Vérifiez chaque livrable déposé par les membres. Seul le Super Administrateur peut prononcer la validation finale.
+              </p>
             </div>
           </CardContent>
         </Card>

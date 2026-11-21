@@ -54,22 +54,27 @@ export async function executeFinalApproval(
     };
   }
 
-  // 3. Execute update in PostgreSQL (Protected by check_task_submission_approval trigger and RLS)
-  const { error: updateErr } = await (supabase.from("task_submissions") as any)
-    .update({
-      status: "APPROVED",
-      super_admin_id: user.id,
-      super_admin_notes: decisionNotes || "Validé définitivement par le Super Administrateur",
-      approved_by_super_admin_at: new Date().toISOString(),
-    })
-    .eq("id", submissionId);
+    // 3. Execute update in PostgreSQL (Protected by check_task_submission_approval trigger and RLS)
+    const { error: updateErr } = await (supabase.from("task_submissions") as any)
+      .update({
+        status: "APPROVED",
+        super_admin_id: user.id,
+        super_admin_notes: decisionNotes || "Validé définitivement par le Super Administrateur",
+        approved_by_super_admin_at: new Date().toISOString(),
+      })
+      .eq("id", submissionId);
 
-  if (updateErr) {
-    return {
-      success: false,
-      message: `Erreur base de données: ${updateErr.message}`,
-    };
-  }
+    if (updateErr) {
+      return {
+        success: false,
+        message: `Erreur base de données: ${updateErr.message}`,
+      };
+    }
+
+    // Also update parent task to APPROVED
+    await (supabase.from("tasks") as any)
+      .update({ status: "APPROVED" })
+      .eq("id", typedSubmission.task_id);
 
   // 4. Log in approval history
   await (supabase.from("approval_history") as any).insert({
@@ -119,34 +124,40 @@ export async function submitCoordinatorReview(
     status: string;
   };
 
-  const newStatus = action === "SUBMIT_TO_SUPER_ADMIN" ? "SUPER_ADMIN_APPROVAL" : "REVISION_REQUIRED";
+    const newSubStatus = action === "SUBMIT_TO_SUPER_ADMIN" ? "PENDING_SUPER_ADMIN" : "REVISION_REQUIRED";
+    const newTaskStatus = action === "SUBMIT_TO_SUPER_ADMIN" ? "SUPER_ADMIN_APPROVAL" : "REVISION_REQUIRED";
 
-  const { error: updateErr } = await (supabase.from("task_submissions") as any)
-    .update({
-      status: newStatus,
-      coordinator_id: user.id,
-      coordinateur_notes: notes,
-      reviewed_by_coordinator_at: new Date().toISOString(),
-    })
-    .eq("id", submissionId);
+    const { error: updateErr } = await (supabase.from("task_submissions") as any)
+      .update({
+        status: newSubStatus,
+        coordinator_id: user.id,
+        coordinateur_notes: notes,
+        reviewed_by_coordinator_at: new Date().toISOString(),
+      })
+      .eq("id", submissionId);
 
-  if (updateErr) {
+    if (updateErr) {
+      return {
+        success: false,
+        message: `Erreur lors de la revue: ${updateErr.message}`,
+      };
+    }
+
+    // Also update parent task status
+    await (supabase.from("tasks") as any)
+      .update({ status: newTaskStatus })
+      .eq("id", typedSubmission.task_id);
+
+    await (supabase.from("approval_history") as any).insert({
+      submission_id: submissionId,
+      task_id: typedSubmission.task_id,
+      actor_id: user.id,
+      action: newSubStatus,
+      decision_reason: `Revue coordinateur (${profile.full_name}) : ${notes}`,
+    });
+
     return {
-      success: false,
-      message: `Erreur lors de la revue: ${updateErr.message}`,
+      success: true,
+      message: `Revue de conformité enregistrée (${newSubStatus}).`,
     };
-  }
-
-  await (supabase.from("approval_history") as any).insert({
-    submission_id: submissionId,
-    task_id: typedSubmission.task_id,
-    actor_id: user.id,
-    action: newStatus,
-    decision_reason: `Revue coordinateur (${profile.full_name}) : ${notes}`,
-  });
-
-  return {
-    success: true,
-    message: `Revue de conformité enregistrée (${newStatus}).`,
-  };
 }

@@ -11,59 +11,70 @@ import {
   RotateCcw,
   Clock,
   AlertTriangle,
+  AlertCircle,
 } from "lucide-react";
+import { executeFinalApproval } from "@/app/actions/approvals";
 
-interface ApprovalItem {
+export interface ApprovalItem {
   id: string;
   taskTitle: string;
-  project: string;
+  projectTitle: string;
   department: string;
   submittedBy: string;
-  coordinatorReviewer: string;
-  version: number;
   submittedAt: string;
+  version: number;
   notes: string;
 }
 
-const INITIAL_APPROVALS: ApprovalItem[] = [
-  {
-    id: "app-01",
-    taskTitle: "Affiche Officielle — Derby Tunisien 2026",
-    project: "Campagne Visuelle Derby",
-    department: "Créatif & Design",
-    submittedBy: "Yassine Ayari",
-    coordinatorReviewer: "Nourhene Trabelsi (Validé Coord)",
-    version: 2,
-    submittedAt: "Aujourd'hui à 14:30",
-    notes: "Formats 1080x1350 et stories conformes à la charte. Logos partenaires intégrés.",
-  },
-  {
-    id: "app-02",
-    taskTitle: "Teaser Vidéo — Lancement Espace Digital",
-    project: "Communication Digitale",
-    department: "Audiovisuel & Montage",
-    submittedBy: "Karim Zouari",
-    coordinatorReviewer: "Fares Mansouri (Validé Coord)",
-    version: 1,
-    submittedAt: "Aujourd'hui à 11:15",
-    notes: "Rendu 4K 60fps. Bande sonore originale UEC synchronisée.",
-  },
-];
+interface ApprovalsViewProps {
+  userEmail: string;
+  initialApprovals: ApprovalItem[];
+}
 
-export function ApprovalsView({ userEmail }: { userEmail: string }) {
-  const [approvals, setApprovals] = useState<ApprovalItem[]>(INITIAL_APPROVALS);
-  const [notice, setNotice] = useState<string | null>(null);
+export function ApprovalsView({ userEmail, initialApprovals }: ApprovalsViewProps) {
+  const [approvals, setApprovals] = useState<ApprovalItem[]>(initialApprovals);
+  const [notice, setNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [isProcessing, setIsProcessing] = useState<string | null>(null);
 
-  const handleAction = (id: string, action: "APPROVED" | "REVISION" | "REJECTED", title: string) => {
-    setApprovals(approvals.filter((a) => a.id !== id));
-    if (action === "APPROVED") {
-      setNotice(`✅ Livrable "${title}" validé définitivement par le Super Administrateur.`);
-    } else if (action === "REVISION") {
-      setNotice(`⚠️ Demande de révision envoyée pour "${title}".`);
-    } else {
-      setNotice(`❌ Livrable "${title}" rejeté.`);
+  const handleAction = async (id: string, action: "APPROVED" | "REVISION" | "REJECTED", title: string) => {
+    setIsProcessing(id);
+    setNotice(null);
+
+    try {
+      if (action === "APPROVED") {
+        const res = await executeFinalApproval(id, "Validé définitivement par le Super Administrateur.");
+        if (res.success) {
+          setApprovals((prev) => prev.filter((a) => a.id !== id));
+          setNotice({
+            type: "success",
+            message: `Livrable "${title}" validé définitivement par le Super Administrateur.`,
+          });
+        } else {
+          setNotice({ type: "error", message: res.message });
+        }
+      } else {
+        const reason = window.prompt(
+          action === "REVISION" ? "Motif de la demande de révision :" : "Motif du rejet officiel :",
+          action === "REVISION" ? "Modifications techniques requises." : "Non conforme aux critères UEC."
+        );
+        if (!reason) {
+          setIsProcessing(null);
+          return;
+        }
+
+        setApprovals((prev) => prev.filter((a) => a.id !== id));
+        setNotice({
+          type: "success",
+          message: action === "REVISION"
+            ? `Demande de révision transmise pour "${title}".`
+            : `Livrable "${title}" rejeté.`,
+        });
+      }
+    } catch (err: any) {
+      setNotice({ type: "error", message: err.message || "Erreur de traitement" });
+    } finally {
+      setIsProcessing(null);
     }
-    setTimeout(() => setNotice(null), 5000);
   };
 
   return (
@@ -101,9 +112,22 @@ export function ApprovalsView({ userEmail }: { userEmail: string }) {
       </div>
 
       {notice && (
-        <div className="p-3.5 rounded-xl bg-emerald-950/70 border border-emerald-700 text-xs text-emerald-200 flex items-center justify-between shadow-lg">
-          <span>{notice}</span>
-          <button onClick={() => setNotice(null)} className="text-emerald-400 hover:text-white">
+        <div
+          className={`p-3.5 rounded-xl border text-xs flex items-center justify-between shadow-lg ${
+            notice.type === "success"
+              ? "bg-emerald-950/70 border-emerald-700 text-emerald-200"
+              : "bg-red-950/70 border-red-700 text-red-200"
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {notice.type === "success" ? (
+              <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+            ) : (
+              <AlertCircle size={16} className="text-red-400 shrink-0" />
+            )}
+            <span>{notice.message}</span>
+          </div>
+          <button onClick={() => setNotice(null)} className="text-slate-400 hover:text-white">
             ✕
           </button>
         </div>
@@ -123,6 +147,7 @@ export function ApprovalsView({ userEmail }: { userEmail: string }) {
             <div className="py-12 text-center text-slate-400">
               <CheckCircle2 size={36} className="text-emerald-400 mx-auto mb-2 opacity-80" />
               <p className="text-sm font-medium">Toutes les approbations sont à jour.</p>
+              <p className="text-xs text-slate-400 mt-1">Aucun livrable en attente de décision dans la base PostgreSQL.</p>
             </div>
           ) : (
             <div className="divide-y divide-[#1F2937]">
@@ -147,21 +172,19 @@ export function ApprovalsView({ userEmail }: { userEmail: string }) {
                   <div className="p-3 rounded-lg bg-[#172033] border border-[#27354F] text-xs text-slate-300 space-y-1">
                     <p className="font-semibold text-slate-200">Notes du livrable :</p>
                     <p className="italic">{item.notes}</p>
-                    <p className="text-[11px] text-uec-cyan pt-1">
-                      ✓ Revue préalable : {item.coordinatorReviewer}
-                    </p>
                   </div>
 
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
                     <div className="text-xs text-slate-400">
                       Soumis par : <strong className="text-slate-200">{item.submittedBy}</strong> • Projet :{" "}
-                      <strong className="text-slate-200">{item.project}</strong>
+                      <strong className="text-slate-200">{item.projectTitle}</strong>
                     </div>
 
                     <div className="flex items-center gap-2">
                       <Button
                         variant="danger"
                         size="sm"
+                        disabled={isProcessing === item.id}
                         onClick={() => handleAction(item.id, "REJECTED", item.taskTitle)}
                         className="text-xs bg-rose-700 hover:bg-rose-800"
                       >
@@ -171,6 +194,7 @@ export function ApprovalsView({ userEmail }: { userEmail: string }) {
                       <Button
                         variant="outline"
                         size="sm"
+                        disabled={isProcessing === item.id}
                         onClick={() => handleAction(item.id, "REVISION", item.taskTitle)}
                         className="text-xs text-amber-300 border-amber-800 hover:bg-amber-950/40"
                       >
@@ -180,11 +204,12 @@ export function ApprovalsView({ userEmail }: { userEmail: string }) {
                       <Button
                         variant="primary"
                         size="sm"
+                        disabled={isProcessing === item.id}
                         onClick={() => handleAction(item.id, "APPROVED", item.taskTitle)}
                         className="text-xs bg-emerald-600 hover:bg-emerald-500 border-emerald-500/50"
                       >
                         <CheckCircle2 size={14} className="mr-1" />
-                        Valider Définitivement
+                        {isProcessing === item.id ? "Validation..." : "Valider Définitivement"}
                       </Button>
                     </div>
                   </div>

@@ -3,7 +3,6 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { useTranslation } from "@/lib/i18n/context";
-import { useAuth } from "@/lib/auth/auth-context";
 import { StatCard } from "@/components/ui/stat-card";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,58 +13,30 @@ import {
   Clock,
   UploadCloud,
   FileCheck2,
-  Calendar,
   AlertCircle,
   Megaphone,
   CheckCircle2,
   ExternalLink,
   Send,
 } from "lucide-react";
+import type { MemberDashboardData } from "@/lib/data/dashboard";
+import { submitDeliverableAction } from "@/app/actions/tasks";
 
-interface MemberTask {
-  id: string;
-  title: string;
-  project: string;
-  priority: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-  dueDate: string;
-  status: "TODO" | "IN_PROGRESS" | "SUBMITTED" | "APPROVED" | "REVISION_REQUIRED";
+interface MemberDashboardProps {
+  data: MemberDashboardData;
+  userName: string;
+  departmentName: string;
 }
 
-const MOCK_MEMBER_TASKS: MemberTask[] = [
-  {
-    id: "task-01",
-    title: "Montage Vidéo Récapitulatif Match CA",
-    project: "Contenu Matchday 2026",
-    priority: "HIGH",
-    dueDate: "Demain, 18:00",
-    status: "IN_PROGRESS",
-  },
-  {
-    id: "task-02",
-    title: "Création Shorts & Reels TikTok — 5 capsules",
-    project: "Stratégie Virale UEC",
-    priority: "MEDIUM",
-    dueDate: "24 Nov 2026",
-    status: "TODO",
-  },
-  {
-    id: "task-03",
-    title: "Teaser Audio Podcast Clubiste Ep 04",
-    project: "Podcast UEC",
-    priority: "LOW",
-    dueDate: "28 Nov 2026",
-    status: "SUBMITTED",
-  },
-];
-
-export function MemberDashboard() {
+export function MemberDashboard({ data, userName, departmentName }: MemberDashboardProps) {
   const { t } = useTranslation();
-  const { profile } = useAuth();
-  const [tasks, setTasks] = useState<MemberTask[]>(MOCK_MEMBER_TASKS);
-  const [selectedTask, setSelectedTask] = useState<MemberTask | null>(null);
+  const [tasks, setTasks] = useState(data.myTasks);
+  const [selectedTask, setSelectedTask] = useState<(typeof data.myTasks)[0] | null>(null);
+  const [deliverableTitle, setDeliverableTitle] = useState("");
   const [submissionLink, setSubmissionLink] = useState("");
   const [submissionNotes, setSubmissionNotes] = useState("");
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const priorityBadges = {
     LOW: "default" as const,
@@ -74,31 +45,66 @@ export function MemberDashboard() {
     CRITICAL: "red" as const,
   };
 
-  const statusBadges = {
-    TODO: { label: "À faire", variant: "default" as const },
-    IN_PROGRESS: { label: "En cours", variant: "review" as const },
-    SUBMITTED: { label: "Soumis (Revue)", variant: "pending" as const },
-    APPROVED: { label: "Validé Super Admin", variant: "approved" as const },
-    REVISION_REQUIRED: { label: "Révision Demandée", variant: "revision" as const },
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "TODO":
+        return <Badge variant="default" size="sm">À faire</Badge>;
+      case "IN_PROGRESS":
+        return <Badge variant="review" size="sm">En cours</Badge>;
+      case "COORDINATOR_REVIEW":
+      case "PENDING_COORDINATOR":
+      case "SUBMITTED":
+        return <Badge variant="pending" size="sm">Revue Coordinateur</Badge>;
+      case "SUPER_ADMIN_APPROVAL":
+      case "PENDING_SUPER_ADMIN":
+        return <Badge variant="superAdmin" size="sm">Attente Super Admin</Badge>;
+      case "APPROVED":
+      case "DONE":
+        return <Badge variant="approved" size="sm">Validé</Badge>;
+      case "REVISION_REQUIRED":
+        return <Badge variant="revision" size="sm">Révision Demandée</Badge>;
+      default:
+        return <Badge variant="default" size="sm">{status}</Badge>;
+    }
   };
 
-  const handleSubmitDeliverable = (e: React.FormEvent) => {
+  const handleSubmitDeliverable = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedTask) return;
+    setIsSubmitting(true);
+    setNotice(null);
 
-    setTasks(
-      tasks.map((t) =>
-        t.id === selectedTask.id ? { ...t, status: "SUBMITTED" } : t
-      )
-    );
+    try {
+      const urls = submissionLink ? [submissionLink.trim()] : [];
+      const res = await submitDeliverableAction(
+        selectedTask.id,
+        deliverableTitle || `Livrable pour ${selectedTask.title}`,
+        submissionNotes,
+        urls
+      );
 
-    setNotice(
-      `Livrable pour "${selectedTask.title}" soumis avec succès. Transmis au coordinateur de votre pôle pour revue.`
-    );
-    setSelectedTask(null);
-    setSubmissionLink("");
-    setSubmissionNotes("");
-    setTimeout(() => setNotice(null), 5000);
+      if (res.success) {
+        setTasks((prev) =>
+          prev.map((t) =>
+            t.id === selectedTask.id ? { ...t, status: "COORDINATOR_REVIEW" } : t
+          )
+        );
+        setNotice({
+          type: "success",
+          message: `Livrable pour "${selectedTask.title}" soumis avec succès au coordinateur.`,
+        });
+        setSelectedTask(null);
+        setDeliverableTitle("");
+        setSubmissionLink("");
+        setSubmissionNotes("");
+      } else {
+        setNotice({ type: "error", message: res.message });
+      }
+    } catch (err: any) {
+      setNotice({ type: "error", message: err.message || "Erreur lors de la soumission" });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -108,14 +114,14 @@ export function MemberDashboard() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl lg:text-3xl font-extrabold text-white tracking-tight">
-              Bonjour, {profile?.full_name?.split(" ")[0]}
+              Bonjour, {userName.split(" ")[0] || "Membre"}
             </h1>
             <Badge variant="member" size="md">
               ESPACE MEMBRE
             </Badge>
           </div>
           <p className="text-sm text-slate-400 mt-1">
-            {profile?.department_name || "Pôle Audiovisuel & Montage"} — Suivez vos missions et soumettez vos travaux.
+            {departmentName} — Suivez vos missions assignées et soumettez vos travaux.
           </p>
         </div>
 
@@ -123,19 +129,29 @@ export function MemberDashboard() {
           <Link href="/dashboard/tasks">
             <Button variant="secondary" size="sm">
               <CheckSquare size={15} className="mr-1.5" />
-              Toutes Mes Tâches
+              Toutes les Tâches
             </Button>
           </Link>
         </div>
       </div>
 
       {notice && (
-        <div className="p-3.5 rounded-xl bg-emerald-950/70 border border-emerald-700 text-xs text-emerald-200 flex items-center justify-between shadow-lg">
+        <div
+          className={`p-3.5 rounded-xl border text-xs flex items-center justify-between shadow-lg ${
+            notice.type === "success"
+              ? "bg-emerald-950/70 border-emerald-700 text-emerald-200"
+              : "bg-red-950/70 border-red-700 text-red-200"
+          }`}
+        >
           <div className="flex items-center gap-2">
-            <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
-            <span>{notice}</span>
+            {notice.type === "success" ? (
+              <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+            ) : (
+              <AlertCircle size={16} className="text-red-400 shrink-0" />
+            )}
+            <span>{notice.message}</span>
           </div>
-          <button onClick={() => setNotice(null)} className="text-emerald-400 hover:text-white">
+          <button onClick={() => setNotice(null)} className="text-slate-400 hover:text-white">
             ✕
           </button>
         </div>
@@ -145,7 +161,7 @@ export function MemberDashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="Tâches Assignées"
-          value={tasks.filter((t) => t.status !== "APPROVED").length}
+          value={data.assignedTaskCount}
           description="En attente ou en cours"
           icon={<CheckSquare size={20} />}
           accentColor="blue"
@@ -153,26 +169,26 @@ export function MemberDashboard() {
 
         <StatCard
           title="Échéances Imminentes"
-          value="1"
+          value={data.upcomingDeadlineCount}
           description="Dans les prochaines 48h"
-          trend={{ value: "Urgent", isPositive: false }}
+          trend={{ value: data.upcomingDeadlineCount > 0 ? "Urgent" : "À jour", isPositive: data.upcomingDeadlineCount === 0 }}
           icon={<Clock size={20} />}
           accentColor="red"
         />
 
         <StatCard
-          title="Livrables Soumis"
-          value={tasks.filter((t) => t.status === "SUBMITTED").length}
-          description="En attente de revue"
+          title="Livrables Transmis"
+          value={data.submittedCount}
+          description="En cours de revue"
           icon={<UploadCloud size={20} />}
           accentColor="gold"
         />
 
         <StatCard
           title="Validés Super Admin"
-          value="12"
-          description="Depuis le début de saison"
-          trend={{ value: "100% approuvé", isPositive: true }}
+          value={data.approvedCount}
+          description="Livrables approuvés"
+          trend={{ value: "Archivés", isPositive: true }}
           icon={<FileCheck2 size={20} />}
           accentColor="green"
         />
@@ -184,61 +200,77 @@ export function MemberDashboard() {
           <div>
             <CardTitle className="text-white flex items-center gap-2">
               <CheckSquare size={18} className="text-uec-red" />
-              <span>Mes Missions & Livrables</span>
+              <span>Mes Missions & Livrables ({tasks.length})</span>
             </CardTitle>
             <CardDescription className="text-slate-400">
-              Cliquez sur "Soumettre" dès que votre production est prête pour la revue du coordinateur.
+              Cliquez sur "Soumettre Livrable" dès que votre production est prête pour la revue du coordinateur.
             </CardDescription>
           </div>
         </CardHeader>
 
         <CardContent className="p-0">
-          <div className="divide-y divide-[#1F2937]">
-            {tasks.map((task) => (
-              <div
-                key={task.id}
-                className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-900/40 transition-colors"
-              >
-                <div className="space-y-1.5 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-bold text-white">{task.title}</span>
-                    <Badge variant={priorityBadges[task.priority]} size="sm">
-                      {task.priority}
-                    </Badge>
-                    <Badge variant={statusBadges[task.status].variant} size="sm">
-                      {statusBadges[task.status].label}
-                    </Badge>
+          {tasks.length === 0 ? (
+            <div className="py-12 text-center text-slate-400">
+              <CheckCircle2 size={36} className="text-emerald-500 mx-auto mb-2 opacity-80" />
+              <p className="text-sm font-medium">Aucune tâche active assignée actuellement.</p>
+              <p className="text-xs text-slate-400 mt-1">Consultez le module Tâches pour explorer les opportunités de contribution.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-[#1F2937]">
+              {tasks.map((task) => (
+                <div
+                  key={task.id}
+                  className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-900/40 transition-colors"
+                >
+                  <div className="space-y-1.5 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-bold text-white">{task.title}</span>
+                      <Badge variant={priorityBadges[task.priority] || "default"} size="sm">
+                        {task.priority}
+                      </Badge>
+                      {getStatusBadge(task.status)}
+                    </div>
+                    <div className="flex items-center gap-4 text-xs text-slate-400">
+                      <span>Projet : <strong className="text-slate-300">{task.project}</strong></span>
+                      <span>•</span>
+                      <span className="flex items-center gap-1 text-slate-400">
+                        <Clock size={12} /> Échéance : {task.dueDate}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-4 text-xs text-slate-400">
-                    <span>Projet : <strong className="text-slate-300">{task.project}</strong></span>
-                    <span>•</span>
-                    <span className="flex items-center gap-1 text-amber-400">
-                      <Clock size={12} /> Échéance : {task.dueDate}
-                    </span>
-                  </div>
-                </div>
 
-                {/* Action button */}
-                <div className="self-end sm:self-center">
-                  {task.status === "SUBMITTED" ? (
-                    <span className="text-xs text-slate-400 italic flex items-center gap-1">
-                      <Clock size={13} /> En attente de validation
-                    </span>
-                  ) : (
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={() => setSelectedTask(task)}
-                      className="text-xs"
-                    >
-                      <UploadCloud size={14} className="mr-1" />
-                      Soumettre Livrable
-                    </Button>
-                  )}
+                  {/* Action button */}
+                  <div className="self-end sm:self-center">
+                    {task.status === "COORDINATOR_REVIEW" ||
+                    task.status === "SUPER_ADMIN_APPROVAL" ||
+                    task.status === "PENDING_COORDINATOR" ||
+                    task.status === "PENDING_SUPER_ADMIN" ? (
+                      <span className="text-xs text-slate-400 italic flex items-center gap-1">
+                        <Clock size={13} /> En attente de validation
+                      </span>
+                    ) : task.status === "APPROVED" || task.status === "DONE" ? (
+                      <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1">
+                        <CheckCircle2 size={13} /> Validé
+                      </span>
+                    ) : (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => {
+                          setSelectedTask(task);
+                          setDeliverableTitle(`Livrable: ${task.title}`);
+                        }}
+                        className="text-xs"
+                      >
+                        <UploadCloud size={14} className="mr-1" />
+                        Soumettre Livrable
+                      </Button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -262,12 +294,23 @@ export function MemberDashboard() {
             <form onSubmit={handleSubmitDeliverable} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Lien du Livrable (Drive / Figma / Wetransfer / GitHub / Storage)
+                  Titre du Livrable *
                 </label>
                 <Input
                   required
+                  placeholder="Ex: Version finale haute définition"
+                  value={deliverableTitle}
+                  onChange={(e) => setDeliverableTitle(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Lien du Livrable (Drive / Figma / Wetransfer / GitHub / Storage)
+                </label>
+                <Input
                   type="url"
-                  placeholder="https://..."
+                  placeholder="https://drive.google.com/..."
                   value={submissionLink}
                   onChange={(e) => setSubmissionLink(e.target.value)}
                   icon={<ExternalLink size={15} />}
@@ -276,7 +319,7 @@ export function MemberDashboard() {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Notes & Précisions pour le Coordinateur et le Super Admin
+                  Notes & Précisions pour le Coordinateur et le Super Admin *
                 </label>
                 <textarea
                   rows={4}
@@ -301,9 +344,9 @@ export function MemberDashboard() {
                 >
                   Annuler
                 </Button>
-                <Button type="submit" variant="primary" size="sm">
+                <Button type="submit" variant="primary" size="sm" disabled={isSubmitting}>
                   <Send size={14} className="mr-1" />
-                  Confirmer la Soumission
+                  {isSubmitting ? "Envoi..." : "Confirmer la Soumission"}
                 </Button>
               </div>
             </form>
@@ -316,20 +359,20 @@ export function MemberDashboard() {
         <CardHeader>
           <CardTitle className="text-white flex items-center gap-2">
             <Megaphone size={18} className="text-uec-cyan" />
-            <span>Annonces Officielles du Pôle Digital</span>
+            <span>Directives du Pôle Digital UEC</span>
           </CardTitle>
           <CardDescription className="text-slate-400">
-            Notes de service et directives internes
+            Charte de production et rigueur méthodologique
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="p-4 rounded-xl bg-[#172033] border border-[#27354F] space-y-1">
             <div className="flex items-center justify-between text-xs">
-              <span className="font-bold text-white">Réunion Mensuelle de Coordination — Dimanche 20:00</span>
-              <span className="text-uec-red font-semibold text-[11px]">Obligatoire</span>
+              <span className="font-bold text-white">Charte Officielle UEC — أصحاب الفكرة والعقول</span>
+              <span className="text-uec-red font-semibold text-[11px]">En vigueur</span>
             </div>
             <p className="text-xs text-slate-300">
-              Point d'avancement sur les projets en cours et préparation de la couverture médiatique du Derby.
+              Tous les visuels, vidéos et contenus publiés doivent respecter rigoureusement la palette rouge (#D62839) et bleu (#2563EB) et l'identité historique clubiste.
             </p>
           </div>
         </CardContent>

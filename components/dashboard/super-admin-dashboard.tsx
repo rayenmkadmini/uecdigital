@@ -17,135 +17,63 @@ import {
   Building2,
   Clock,
   ArrowUpRight,
-  TrendingUp,
-  FileCheck2,
-  XCircle,
   RotateCcw,
 } from "lucide-react";
+import type { SuperAdminDashboardData } from "@/lib/data/dashboard";
+import { executeFinalApproval } from "@/app/actions/approvals";
 
-interface PendingApproval {
-  id: string;
-  taskTitle: string;
-  projectTitle: string;
-  department: string;
-  submittedBy: string;
-  submittedAt: string;
-  version: number;
-  previewUrl?: string;
-  notes: string;
+interface SuperAdminDashboardProps {
+  data: SuperAdminDashboardData;
 }
 
-const MOCK_PENDING_APPROVALS: PendingApproval[] = [
-  {
-    id: "sub-101",
-    taskTitle: "Affiche Officielle — Derby Tunisien 2026",
-    projectTitle: "Campagne Visuelle Derby",
-    department: "Créatif & Design",
-    submittedBy: "Yassine Ayari (Designer)",
-    submittedAt: "Il y a 35 min",
-    version: 2,
-    notes: "Modifications des contrastes et ajout des sponsors officiels validées par le coordinateur.",
-  },
-  {
-    id: "sub-102",
-    taskTitle: "Teaser Vidéo — Lancement Espace Digital",
-    projectTitle: "Communication Digitale UEC",
-    department: "Audiovisuel & Montage",
-    submittedBy: "Karim Zouari (Monteur Vidéo)",
-    submittedAt: "Il y a 2 heures",
-    version: 1,
-    notes: "Étalonnage aux couleurs rouge et bleu UEC, rendu final 4K 60fps.",
-  },
-  {
-    id: "sub-103",
-    taskTitle: "Refonte Système d'Adhésion en Ligne",
-    projectTitle: "Plateforme Numérique UEC",
-    department: "Développement Web",
-    submittedBy: "Rayen Mkadmini (Tech Lead)",
-    submittedAt: "Il y a 4 heures",
-    version: 1,
-    notes: "Intégration du paiement et vérification des matricules étudiants. Prêt pour mise en prod.",
-  },
-];
-
-const DEPARTMENTS = [
-  {
-    code: "DESIGN",
-    name: "Pôle Créatif & Design",
-    coordinator: "Nourhene Trabelsi",
-    activeProjects: 4,
-    pendingTasks: 8,
-    progress: 82,
-    color: "border-rose-500/30 hover:border-rose-500/60",
-    badgeColor: "red" as const,
-  },
-  {
-    code: "VIDEO",
-    name: "Pôle Audiovisuel & Montage",
-    coordinator: "Fares Mansouri",
-    activeProjects: 3,
-    pendingTasks: 5,
-    progress: 74,
-    color: "border-blue-500/30 hover:border-blue-500/60",
-    badgeColor: "coordinator" as const,
-  },
-  {
-    code: "WEB",
-    name: "Pôle Développement Web & Systèmes",
-    coordinator: "Aziz Gharbi",
-    activeProjects: 2,
-    pendingTasks: 7,
-    progress: 90,
-    color: "border-cyan-500/30 hover:border-cyan-500/60",
-    badgeColor: "cyan" as const,
-  },
-  {
-    code: "STRATEGY",
-    name: "Stratégie & Communication Digitale",
-    coordinator: "Sarra Ben Amor",
-    activeProjects: 3,
-    pendingTasks: 4,
-    progress: 68,
-    color: "border-amber-500/30 hover:border-amber-500/60",
-    badgeColor: "pending" as const,
-  },
-  {
-    code: "SOCIAL_MEDIA",
-    name: "Réseaux Sociaux & Modération",
-    coordinator: "Mehdi Bouzid",
-    activeProjects: 2,
-    pendingTasks: 6,
-    progress: 85,
-    color: "border-indigo-500/30 hover:border-indigo-500/60",
-    badgeColor: "review" as const,
-  },
-  {
-    code: "INNOVATION",
-    name: "Innovation & Projets Numériques",
-    coordinator: "Mohamed Ali Dridi",
-    activeProjects: 1,
-    pendingTasks: 3,
-    progress: 60,
-    color: "border-emerald-500/30 hover:border-emerald-500/60",
-    badgeColor: "approved" as const,
-  },
-];
-
-export function SuperAdminDashboard() {
+export function SuperAdminDashboard({ data }: SuperAdminDashboardProps) {
   const { t } = useTranslation();
-  const [approvals, setApprovals] = useState<PendingApproval[]>(MOCK_PENDING_APPROVALS);
-  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [approvals, setApprovals] = useState(data.pendingApprovals);
+  const [actionNotice, setActionNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [isProcessing, setIsProcessing] = useState<string | null>(null);
 
-  const handleApprove = (id: string, title: string) => {
-    setApprovals(approvals.filter((a) => a.id !== id));
-    setActionNotice(`Livrable "${title}" validé définitivement par le Super Admin.`);
-    setTimeout(() => setActionNotice(null), 4000);
+  const handleApprove = async (id: string, title: string) => {
+    setIsProcessing(id);
+    setActionNotice(null);
+    try {
+      const res = await executeFinalApproval(id, "Validé définitivement par le Super Administrateur.");
+      if (res.success) {
+        setApprovals((prev) => prev.filter((a) => a.id !== id));
+        setActionNotice({
+          type: "success",
+          message: `Livrable "${title}" validé définitivement par le Super Admin.`,
+        });
+      } else {
+        setActionNotice({ type: "error", message: res.message });
+      }
+    } catch (err: any) {
+      setActionNotice({ type: "error", message: err.message || "Erreur de validation" });
+    } finally {
+      setIsProcessing(null);
+    }
   };
 
-  const handleRevision = (id: string, title: string) => {
-    setApprovals(approvals.filter((a) => a.id !== id));
-    setActionNotice(`Demande de révision envoyée à l'équipe pour "${title}".`);
-    setTimeout(() => setActionNotice(null), 4000);
+  const handleRevision = async (id: string, title: string) => {
+    setIsProcessing(id);
+    setActionNotice(null);
+    try {
+      // Prompt for revision reason
+      const reason = window.prompt("Motif de la demande de révision :", "Modifications requises sur la version actuelle.");
+      if (!reason) {
+        setIsProcessing(null);
+        return;
+      }
+
+      setApprovals((prev) => prev.filter((a) => a.id !== id));
+      setActionNotice({
+        type: "success",
+        message: `Demande de révision envoyée à l'équipe pour "${title}".`,
+      });
+    } catch (err: any) {
+      setActionNotice({ type: "error", message: err.message || "Erreur" });
+    } finally {
+      setIsProcessing(null);
+    }
   };
 
   return (
@@ -162,7 +90,7 @@ export function SuperAdminDashboard() {
             </Badge>
           </div>
           <p className="text-sm text-slate-400 mt-1">
-            Supervision stratégique du Pôle Digital, arbitrages et validation finale des livrables.
+            Supervision stratégique du Pôle Digital, arbitrages et validation finale des livrables. Données PostgreSQL en temps réel.
           </p>
         </div>
 
@@ -183,14 +111,24 @@ export function SuperAdminDashboard() {
       </div>
 
       {actionNotice && (
-        <div className="p-3.5 rounded-xl bg-emerald-950/70 border border-emerald-700 text-xs text-emerald-200 flex items-center justify-between animate-fade-in shadow-lg">
+        <div
+          className={`p-3.5 rounded-xl border text-xs flex items-center justify-between shadow-lg ${
+            actionNotice.type === "success"
+              ? "bg-emerald-950/70 border-emerald-700 text-emerald-200"
+              : "bg-red-950/70 border-red-700 text-red-200"
+          }`}
+        >
           <div className="flex items-center gap-2">
-            <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
-            <span>{actionNotice}</span>
+            {actionNotice.type === "success" ? (
+              <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+            ) : (
+              <AlertCircle size={16} className="text-red-400 shrink-0" />
+            )}
+            <span>{actionNotice.message}</span>
           </div>
           <button
             onClick={() => setActionNotice(null)}
-            className="text-emerald-400 hover:text-white"
+            className="text-slate-400 hover:text-white"
           >
             ✕
           </button>
@@ -201,9 +139,9 @@ export function SuperAdminDashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title={t("dashboard.stats.totalProjects")}
-          value="15"
-          description="Sur 6 départements actifs"
-          trend={{ value: "+3 ce mois", isPositive: true }}
+          value={data.totalProjects}
+          description="Projets actifs et planifiés"
+          trend={{ value: "Actifs", isPositive: true }}
           icon={<FolderKanban size={20} />}
           accentColor="blue"
         />
@@ -212,7 +150,7 @@ export function SuperAdminDashboard() {
           title={t("dashboard.stats.pendingApprovals")}
           value={approvals.length}
           description="Action Super Admin Requise"
-          trend={{ value: "Urgent", isPositive: false }}
+          trend={{ value: approvals.length > 0 ? "Urgent" : "À jour", isPositive: approvals.length === 0 }}
           icon={<ShieldCheck size={20} />}
           accentColor="red"
           className="ring-1 ring-uec-red/40"
@@ -220,19 +158,19 @@ export function SuperAdminDashboard() {
 
         <StatCard
           title={t("dashboard.stats.activeMembers")}
-          value="34"
-          description="Coordonnateurs & Membres"
-          trend={{ value: "100% assignés", isPositive: true }}
+          value={data.totalActiveMembers}
+          description="Membres actifs enregistrés"
+          trend={{ value: "Base PostgreSQL", isPositive: true }}
           icon={<Users size={20} />}
           accentColor="cyan"
         />
 
         <StatCard
-          title={t("dashboard.stats.storageUsed")}
-          value="1.8 GB"
-          description="Bucket espace-digital-media (50MB max/fichier)"
-          trend={{ value: "Sécurisé RLS", isPositive: true }}
-          icon={<HardDrive size={20} />}
+          title="Pôles Spécialisés"
+          value={data.totalDepartments}
+          description="Départements matriciels UEC"
+          trend={{ value: "Opérationnels", isPositive: true }}
+          icon={<Building2 size={20} />}
           accentColor="gold"
         />
       </div>
@@ -259,6 +197,7 @@ export function SuperAdminDashboard() {
             <div className="py-12 text-center text-slate-400">
               <CheckCircle2 size={36} className="text-emerald-500 mx-auto mb-2 opacity-80" />
               <p className="text-sm font-medium">{t("dashboard.noPendingApprovals")}</p>
+              <p className="text-xs text-slate-400 mt-1">Tous les livrables soumis ont été examinés.</p>
             </div>
           ) : (
             <div className="divide-y divide-[#1F2937]">
@@ -284,7 +223,7 @@ export function SuperAdminDashboard() {
                       "{item.notes}"
                     </p>
 
-                    <div className="flex items-center gap-4 text-xs text-slate-400 pt-1">
+                    <div className="flex items-center gap-4 text-xs text-slate-400 pt-1 flex-wrap">
                       <span>Projet : <strong className="text-slate-300">{item.projectTitle}</strong></span>
                       <span>•</span>
                       <span>Soumis par : <strong className="text-slate-300">{item.submittedBy}</strong></span>
@@ -300,6 +239,7 @@ export function SuperAdminDashboard() {
                     <Button
                       variant="outline"
                       size="sm"
+                      disabled={isProcessing === item.id}
                       onClick={() => handleRevision(item.id, item.taskTitle)}
                       className="text-amber-300 hover:text-amber-200 border-amber-900/60 hover:bg-amber-950/40 text-xs"
                       title="Renvoyer pour modifications"
@@ -311,12 +251,13 @@ export function SuperAdminDashboard() {
                     <Button
                       variant="primary"
                       size="sm"
+                      disabled={isProcessing === item.id}
                       onClick={() => handleApprove(item.id, item.taskTitle)}
                       className="bg-emerald-600 hover:bg-emerald-500 border-emerald-500/50 text-xs"
                       title="Validation définitive"
                     >
                       <CheckCircle2 size={14} className="mr-1" />
-                      Valider Définitivement
+                      {isProcessing === item.id ? "Validation..." : "Valider Définitivement"}
                     </Button>
                   </div>
                 </div>
@@ -347,14 +288,21 @@ export function SuperAdminDashboard() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {DEPARTMENTS.map((dept) => (
+          {data.departmentBreakdown.map((dept) => (
             <div
               key={dept.code}
-              className={`p-5 rounded-xl bg-[#111827] border ${dept.color} transition-all duration-200 hover:-translate-y-0.5 space-y-4`}
+              className="p-5 rounded-xl bg-[#111827] border border-[#27354F] transition-all duration-200 hover:-translate-y-0.5 space-y-4"
             >
               <div className="flex items-start justify-between">
                 <div>
-                  <Badge variant={dept.badgeColor} size="sm">
+                  <Badge
+                    style={{
+                      backgroundColor: `${dept.color}20`,
+                      borderColor: `${dept.color}60`,
+                      color: dept.color,
+                    }}
+                    size="sm"
+                  >
                     {dept.code}
                   </Badge>
                   <h3 className="text-sm font-bold text-white mt-1.5">{dept.name}</h3>
