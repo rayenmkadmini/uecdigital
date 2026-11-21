@@ -23,19 +23,26 @@ import {
   X,
   ArrowRight,
   ShieldAlert,
+  Edit2,
+  Trash2,
+  XCircle,
 } from "lucide-react";
 import type {
   EquipmentListItem,
+  EquipmentLoanItem,
   EquipmentCategory,
   EquipmentCondition,
   EquipmentStatus,
 } from "@/lib/data/equipment";
 import {
   createEquipmentAction,
+  deleteEquipmentAction,
   requestEquipmentLoanAction,
   approveEquipmentLoanAction,
+  rejectEquipmentLoanAction,
   returnEquipmentAction,
 } from "@/app/actions/equipment";
+import { EquipmentEditModal } from "./equipment-edit-modal";
 
 interface EquipmentViewProps {
   initialEquipment: EquipmentListItem[];
@@ -77,19 +84,19 @@ const STATUS_CONFIG: Record<
       | "red";
   }
 > = {
-  AVAILABLE: { label: "Disponible en Stock", variant: "approved" },
-  LOANED: { label: "En Prêt Actif", variant: "review" },
-  MAINTENANCE: { label: "En Révision / SAV", variant: "rejected" },
-  RETIRED: { label: "Hors Service", variant: "default" },
+  AVAILABLE: { label: "Disponible", variant: "approved" },
+  LOANED: { label: "En Prêt", variant: "review" },
+  MAINTENANCE: { label: "En Maintenance / SAV", variant: "rejected" },
+  RETIRED: { label: "Réformé", variant: "default" },
 };
 
 const CONDITION_CONFIG: Record<EquipmentCondition, { label: string; color: string }> = {
   NEW: { label: "Neuf", color: "text-emerald-400" },
-  EXCELLENT: { label: "Excellent", color: "text-emerald-300" },
-  GOOD: { label: "Bon état", color: "text-blue-300" },
-  FAIR: { label: "État d'usage", color: "text-amber-300" },
+  EXCELLENT: { label: "Excellent", color: "text-emerald-400" },
+  GOOD: { label: "Bon état", color: "text-blue-400" },
+  FAIR: { label: "État d'usage", color: "text-amber-400" },
   DAMAGED: { label: "Endommagé", color: "text-rose-400" },
-  MAINTENANCE: { label: "Maintenance", color: "text-rose-300" },
+  MAINTENANCE: { label: "En révision", color: "text-red-500 font-bold" },
 };
 
 export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps) {
@@ -97,36 +104,50 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
+
+  // Modals state
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [editingEquipment, setEditingEquipment] = useState<EquipmentListItem | null>(null);
+  const [isEditOpen, setIsEditOpen] = useState(false);
   const [loanTarget, setLoanTarget] = useState<EquipmentListItem | null>(null);
   const [returnTarget, setReturnTarget] = useState<EquipmentListItem | null>(null);
+
   const [isPending, startTransition] = useTransition();
   const [actionMessage, setActionMessage] = useState<{ text: string; error?: boolean } | null>(null);
 
-  // Form State for Add
+  // New Equipment Form State
   const [newEquip, setNewEquip] = useState({
     code: "",
     name: "",
     category: "PHOTO_VIDEO" as EquipmentCategory,
-    description: "",
+    condition: "EXCELLENT" as EquipmentCondition,
     serial_number: "",
-    condition: "GOOD" as EquipmentCondition,
-    storage_location: "Armoire Matériel Siège",
+    storage_location: "",
+    description: "",
   });
 
-  // Form State for Loan Request
+  // Loan Request Form State
   const [loanForm, setLoanForm] = useState({
-    expected_return_date: new Date(Date.now() + 86400000 * 3).toISOString().slice(0, 16),
+    expected_return_date: "",
     notes: "",
   });
 
-  // Form State for Return
+  // Return Form State
   const [returnForm, setReturnForm] = useState({
     condition_at_return: "GOOD" as EquipmentCondition,
     notes: "",
   });
 
+  // Loan Rejection State
+  const [rejectTarget, setRejectTarget] = useState<{
+    loanId: string;
+    equipId: string;
+    name: string;
+  } | null>(null);
+  const [rejectionReason, setRejectionReason] = useState("");
+
   const isSuperAdmin = userRole === "SUPER_ADMIN";
+  const canManage = userRole === "SUPER_ADMIN" || userRole === "COORDINATOR";
 
   const filteredEquipment = equipment.filter((eq) => {
     if (categoryFilter !== "ALL" && eq.category !== categoryFilter) return false;
@@ -156,36 +177,53 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
       if (res.success) {
         setActionMessage({ text: res.message });
         setIsAddOpen(false);
-        const addedItem: EquipmentListItem = {
+        const newItem: EquipmentListItem = {
           id: res.data.id,
-          code: newEquip.code,
+          code: newEquip.code.toUpperCase(),
           name: newEquip.name,
           category: newEquip.category,
-          description: newEquip.description || null,
-          serial_number: newEquip.serial_number || null,
           condition: newEquip.condition,
           status: "AVAILABLE",
+          serial_number: newEquip.serial_number || null,
           storage_location: newEquip.storage_location || null,
+          description: newEquip.description || null,
           purchase_date: null,
           photo_url: null,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           current_loan: null,
         };
-        setEquipment([addedItem, ...equipment]);
+        setEquipment([newItem, ...equipment]);
         setNewEquip({
           code: "",
           name: "",
           category: "PHOTO_VIDEO",
-          description: "",
+          condition: "EXCELLENT",
           serial_number: "",
-          condition: "GOOD",
-          storage_location: "Armoire Matériel Siège",
+          storage_location: "",
+          description: "",
         });
       } else {
         setActionMessage({ text: res.message, error: true });
       }
       setTimeout(() => setActionMessage(null), 4000);
+    });
+  };
+
+  const handleDeleteEquipment = (eq: EquipmentListItem) => {
+    if (!confirm(`Supprimer définitivement l'équipement "${eq.name}" (${eq.code}) de l'inventaire ?`)) {
+      return;
+    }
+
+    startTransition(async () => {
+      const res = await deleteEquipmentAction(eq.id);
+      if (res.success) {
+        setEquipment((prev) => prev.filter((e) => e.id !== eq.id));
+        setActionMessage({ text: "Matériel supprimé avec succès." });
+      } else {
+        setActionMessage({ text: res.message, error: true });
+      }
+      setTimeout(() => setActionMessage(null), 3000);
     });
   };
 
@@ -197,33 +235,37 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
       const res = await requestEquipmentLoanAction(
         loanTarget.id,
         loanForm.expected_return_date,
-        loanForm.notes
+        loanForm.notes || undefined
       );
 
       if (res.success) {
         setActionMessage({ text: res.message });
+        const newLoan: EquipmentLoanItem = {
+          id: res.data.id,
+          equipment_id: loanTarget.id,
+          equipment_name: loanTarget.name,
+          equipment_code: loanTarget.code,
+          borrower_id: "",
+          borrower_name: "Moi",
+          approved_by: null,
+          approver_name: null,
+          borrow_date: new Date().toISOString(),
+          expected_return_date: loanForm.expected_return_date,
+          actual_return_date: null,
+          condition_at_checkout: loanTarget.condition,
+          condition_at_return: null,
+          notes: loanForm.notes || null,
+          status: "REQUESTED",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+
         setEquipment((prev) =>
           prev.map((e) =>
             e.id === loanTarget.id
               ? {
                   ...e,
-                  current_loan: {
-                    id: "temp-loan",
-                    equipment_id: e.id,
-                    borrower_id: "",
-                    borrower_name: "Moi",
-                    approved_by: null,
-                    approver_name: null,
-                    borrow_date: new Date().toISOString(),
-                    expected_return_date: new Date(loanForm.expected_return_date).toISOString(),
-                    actual_return_date: null,
-                    condition_at_checkout: e.condition,
-                    condition_at_return: null,
-                    notes: loanForm.notes,
-                    status: "REQUESTED",
-                    created_at: new Date().toISOString(),
-                    updated_at: new Date().toISOString(),
-                  },
+                  current_loan: newLoan,
                 }
               : e
           )
@@ -236,14 +278,14 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
     });
   };
 
-  const handleApproveLoan = (loanId: string, equipmentId: string) => {
+  const handleApproveLoan = (loanId: string, equipId: string) => {
     startTransition(async () => {
       const res = await approveEquipmentLoanAction(loanId);
       if (res.success) {
         setActionMessage({ text: res.message });
         setEquipment((prev) =>
           prev.map((e) =>
-            e.id === equipmentId
+            e.id === equipId
               ? {
                   ...e,
                   status: "LOANED",
@@ -255,7 +297,30 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
       } else {
         setActionMessage({ text: res.message, error: true });
       }
-      setTimeout(() => setActionMessage(null), 3000);
+      setTimeout(() => setActionMessage(null), 4000);
+    });
+  };
+
+  const handleConfirmRejectLoan = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rejectTarget) return;
+
+    startTransition(async () => {
+      const res = await rejectEquipmentLoanAction(
+        rejectTarget.loanId,
+        rejectionReason.trim() || undefined
+      );
+      if (res.success) {
+        setActionMessage({ text: "Demande d'emprunt refusée." });
+        setEquipment((prev) =>
+          prev.map((e) => (e.id === rejectTarget.equipId ? { ...e, current_loan: null } : e))
+        );
+        setRejectTarget(null);
+        setRejectionReason("");
+      } else {
+        setActionMessage({ text: res.message, error: true });
+      }
+      setTimeout(() => setActionMessage(null), 4000);
     });
   };
 
@@ -267,7 +332,7 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
       const res = await returnEquipmentAction(
         returnTarget.current_loan!.id,
         returnForm.condition_at_return,
-        returnForm.notes
+        returnForm.notes || undefined
       );
 
       if (res.success) {
@@ -294,22 +359,27 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
 
   return (
     <div className="space-y-6">
-      {/* Title & Action */}
+      {/* Title */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
             <Package size={24} className="text-uec-red" />
-            <span>Inventaire & Prêts de Matériel</span>
+            <span>Gestion du Parc Matériel & Logistique</span>
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Traçabilité des équipements audiovisuels, informatiques et logistiques de l'UEC.
+            Inventaire technique, fiches matériel, demandes de sortie et suivi des retours ({equipment.length} équipements répertoriés).
           </p>
         </div>
 
-        {isSuperAdmin && (
-          <Button variant="primary" size="sm" onClick={() => setIsAddOpen(true)}>
-            <Plus size={15} className="mr-1.5" />
-            Ajouter un Matériel
+        {canManage && (
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setIsAddOpen(true)}
+            className="bg-uec-red hover:bg-uec-red/90 text-white"
+          >
+            <Plus size={16} className="mr-1.5" />
+            Ajouter un Équipement
           </Button>
         )}
       </div>
@@ -334,16 +404,16 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <StatCard
-          title="Total Matériel"
+          title="Total Équipements"
           value={stats.total.toString()}
-          description="Enregistrés à l'inventaire"
+          description="Inventaire global UEC"
           icon={<Package size={18} />}
           accentColor="blue"
         />
         <StatCard
           title="Disponibles"
           value={stats.available.toString()}
-          description="Prêts à l'emprunt"
+          description="Prêts à l'emploi"
           icon={<CheckCircle2 size={18} />}
           accentColor="green"
         />
@@ -368,13 +438,13 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
         <CardContent className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="flex flex-1 items-center gap-2 flex-wrap">
             <div className="relative flex-1 min-w-[220px]">
-              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 rtl:left-auto rtl:right-3" />
               <input
                 type="text"
                 placeholder="Rechercher par nom, code ou numéro de série..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full bg-[#111827] text-xs text-white placeholder-slate-500 rounded-lg pl-9 pr-3 py-2 border border-[#1F2937] focus:border-uec-blue focus:outline-none"
+                className="w-full bg-[#111827] text-xs text-white placeholder-slate-500 rounded-lg pl-9 pr-3 py-2 border border-[#1F2937] focus:border-uec-blue focus:outline-none rtl:pl-3 rtl:pr-9"
               />
             </div>
 
@@ -391,6 +461,7 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
               <option value="ACCESSOIRES">Accessoires & Trépieds</option>
               <option value="SONO">Sonorisation</option>
               <option value="LOGISTIQUE">Logistique</option>
+              <option value="AUTRE">Autre</option>
             </select>
 
             {/* Status Filter */}
@@ -415,7 +486,7 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
           title="Aucun matériel trouvé"
           description="Aucun équipement ne correspond à vos critères de recherche dans l'inventaire UEC."
           action={
-            userRole === "SUPER_ADMIN" || userRole === "COORDINATOR"
+            canManage
               ? {
                   label: "Ajouter un Équipement",
                   onClick: () => setIsAddOpen(true),
@@ -433,7 +504,7 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
             const CategoryIcon = CATEGORY_ICONS[eq.category] || Package;
 
             return (
-              <Card key={eq.id} className="flex flex-col justify-between">
+              <Card key={eq.id} className="flex flex-col justify-between hover:border-slate-700 transition-all">
                 <CardHeader className="pb-3 border-b border-[#1F2937]">
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <div className="flex items-center gap-1.5">
@@ -446,9 +517,33 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
                       </span>
                     </div>
 
-                    <Badge variant={statusCfg.variant} size="sm">
-                      {statusCfg.label}
-                    </Badge>
+                    <div className="flex items-center gap-1.5">
+                      <Badge variant={statusCfg.variant} size="sm">
+                        {statusCfg.label}
+                      </Badge>
+                      {canManage && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => {
+                              setEditingEquipment(eq);
+                              setIsEditOpen(true);
+                            }}
+                            className="p-1 text-slate-400 hover:text-white rounded transition-colors"
+                            title="Modifier l'équipement"
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteEquipment(eq)}
+                            disabled={isPending}
+                            className="p-1 text-slate-400 hover:text-rose-400 rounded transition-colors"
+                            title="Supprimer l'équipement"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <CardTitle className="text-sm font-bold text-white line-clamp-1">
@@ -508,12 +603,12 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
                   </div>
 
                   {/* Actions */}
-                  <div className="pt-2 border-t border-[#1F2937] flex items-center justify-end gap-2">
+                  <div className="pt-2 border-t border-[#1F2937] flex flex-col gap-2">
                     {eq.status === "AVAILABLE" && !eq.current_loan && (
                       <Button
                         variant="primary"
                         size="sm"
-                        className="w-full"
+                        className="w-full bg-uec-red hover:bg-uec-red/90 text-white"
                         onClick={() => setLoanTarget(eq)}
                       >
                         <Clock size={13} className="mr-1.5" />
@@ -522,16 +617,34 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
                     )}
 
                     {isSuperAdmin && eq.current_loan?.status === "REQUESTED" && (
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        className="w-full"
-                        disabled={isPending}
-                        onClick={() => handleApproveLoan(eq.current_loan!.id, eq.id)}
-                      >
-                        <CheckCircle2 size={13} className="mr-1.5" />
-                        Autoriser la Sortie
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+                          disabled={isPending}
+                          onClick={() => handleApproveLoan(eq.current_loan!.id, eq.id)}
+                        >
+                          <CheckCircle2 size={13} className="mr-1.5" />
+                          Autoriser
+                        </Button>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          className="flex-1 bg-rose-600 hover:bg-rose-700 text-white"
+                          disabled={isPending}
+                          onClick={() =>
+                            setRejectTarget({
+                              loanId: eq.current_loan!.id,
+                              equipId: eq.id,
+                              name: eq.name,
+                            })
+                          }
+                        >
+                          <XCircle size={13} className="mr-1.5" />
+                          Refuser
+                        </Button>
+                      </div>
                     )}
 
                     {isSuperAdmin && eq.status === "LOANED" && eq.current_loan && (
@@ -583,6 +696,7 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
                       setNewEquip({ ...newEquip, code: e.target.value.toUpperCase() })
                     }
                     placeholder="Ex: MAT-CAM-01"
+                    className="font-mono"
                   />
                 </div>
 
@@ -629,6 +743,7 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
                     value={newEquip.serial_number}
                     onChange={(e) => setNewEquip({ ...newEquip, serial_number: e.target.value })}
                     placeholder="Ex: SN-849129"
+                    className="font-mono"
                   />
                 </div>
 
@@ -643,8 +758,7 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
                     }
                     className="w-full bg-[#0B1020] text-xs text-white rounded-lg px-3 py-2 border border-[#1F2937] focus:border-uec-blue focus:outline-none"
                   >
-                    <option value="NEW">Neuf</option>
-                    <option value="EXCELLENT">Excellent</option>
+                    <option value="EXCELLENT">Excellent (comme neuf)</option>
                     <option value="GOOD">Bon état</option>
                     <option value="FAIR">État d'usage</option>
                   </select>
@@ -671,11 +785,11 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
                   value={newEquip.description}
                   onChange={(e) => setNewEquip({ ...newEquip, description: e.target.value })}
                   placeholder="Fourni avec sacoche, 2 batteries, chargeur..."
-                  className="w-full bg-[#0B1020] text-xs text-white placeholder-slate-500 rounded-lg p-3 border border-[#1F2937] focus:border-uec-blue focus:outline-none"
+                  className="w-full bg-[#0B1020] text-xs text-white placeholder-slate-500 rounded-lg p-3 border border-[#1F2937] focus:border-uec-blue focus:outline-none resize-none leading-relaxed"
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
+              <div className="flex justify-end gap-2 pt-2 border-t border-[#1F2937]">
                 <Button
                   type="button"
                   variant="outline"
@@ -684,7 +798,7 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
                 >
                   Annuler
                 </Button>
-                <Button type="submit" variant="primary" size="sm" disabled={isPending}>
+                <Button type="submit" variant="primary" size="sm" disabled={isPending} className="bg-uec-red hover:bg-uec-red/90 text-white">
                   {isPending ? "Enregistrement..." : "Ajouter au Stock"}
                 </Button>
               </div>
@@ -706,11 +820,11 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
             </button>
 
             <h2 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
-              <Clock size={18} className="text-uec-cyan" />
-              <span>Demande d'Emprunt de Matériel</span>
+              <Clock size={18} className="text-uec-red" />
+              <span>Demande de Sortie Matériel</span>
             </h2>
             <p className="text-xs text-slate-400 mb-4">
-              Vous demandez à emprunter :{" "}
+              Réservation de :{" "}
               <strong className="text-white">
                 [{loanTarget.code}] {loanTarget.name}
               </strong>
@@ -740,11 +854,11 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
                   value={loanForm.notes}
                   onChange={(e) => setLoanForm({ ...loanForm, notes: e.target.value })}
                   placeholder="Ex: Couverture match derby & interview des supporters..."
-                  className="w-full bg-[#0B1020] text-xs text-white placeholder-slate-500 rounded-lg p-3 border border-[#1F2937] focus:border-uec-blue focus:outline-none"
+                  className="w-full bg-[#0B1020] text-xs text-white placeholder-slate-500 rounded-lg p-3 border border-[#1F2937] focus:border-uec-blue focus:outline-none resize-none leading-relaxed"
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
+              <div className="flex justify-end gap-2 pt-2 border-t border-[#1F2937]">
                 <Button
                   type="button"
                   variant="outline"
@@ -753,7 +867,7 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
                 >
                   Annuler
                 </Button>
-                <Button type="submit" variant="primary" size="sm" disabled={isPending}>
+                <Button type="submit" variant="primary" size="sm" disabled={isPending} className="bg-uec-red hover:bg-uec-red/90 text-white">
                   {isPending ? "Transmission..." : "Envoyer la Demande"}
                 </Button>
               </div>
@@ -816,11 +930,11 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
                   value={returnForm.notes}
                   onChange={(e) => setReturnForm({ ...returnForm, notes: e.target.value })}
                   placeholder="Vérification optique effectuée, batterie rechargée..."
-                  className="w-full bg-[#0B1020] text-xs text-white placeholder-slate-500 rounded-lg p-3 border border-[#1F2937] focus:border-uec-blue focus:outline-none"
+                  className="w-full bg-[#0B1020] text-xs text-white placeholder-slate-500 rounded-lg p-3 border border-[#1F2937] focus:border-uec-blue focus:outline-none resize-none leading-relaxed"
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
+              <div className="flex justify-end gap-2 pt-2 border-t border-[#1F2937]">
                 <Button
                   type="button"
                   variant="outline"
@@ -829,7 +943,7 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
                 >
                   Annuler
                 </Button>
-                <Button type="submit" variant="primary" size="sm" disabled={isPending}>
+                <Button type="submit" variant="primary" size="sm" disabled={isPending} className="bg-emerald-600 hover:bg-emerald-700 text-white">
                   {isPending ? "Validation..." : "Valider le Retour au Stock"}
                 </Button>
               </div>
@@ -837,6 +951,85 @@ export function EquipmentView({ initialEquipment, userRole }: EquipmentViewProps
           </div>
         </div>
       )}
+
+      {/* Reject Loan Modal */}
+      {rejectTarget && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-[#0e0e12] border border-white/10 rounded-2xl w-full max-w-md shadow-2xl shadow-black/90 p-6 relative">
+            <button
+              onClick={() => {
+                setRejectTarget(null);
+                setRejectionReason("");
+              }}
+              className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors focus:outline-none focus:ring-2 focus:ring-uec-blue"
+              aria-label="Fermer"
+            >
+              <X size={20} />
+            </button>
+
+            <h2 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
+              <XCircle size={18} className="text-rose-500" />
+              <span>Refus de Demande d'Emprunt</span>
+            </h2>
+            <p className="text-xs text-slate-400 mb-4">
+              Pour le matériel : <strong className="text-white">{rejectTarget.name}</strong>
+            </p>
+
+            <form onSubmit={handleConfirmRejectLoan} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Motif du refus (optionnel)
+                </label>
+                <textarea
+                  rows={3}
+                  value={rejectionReason}
+                  onChange={(e) => setRejectionReason(e.target.value)}
+                  placeholder="Ex: Matériel réservé pour la couverture d'un événement officiel du Club..."
+                  className="w-full bg-[#0B1020] text-xs text-white placeholder-slate-500 rounded-lg p-3 border border-[#1F2937] focus:border-rose-500 focus:outline-none resize-none leading-relaxed"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-[#1F2937]">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setRejectTarget(null);
+                    setRejectionReason("");
+                  }}
+                >
+                  Annuler
+                </Button>
+                <Button
+                  type="submit"
+                  variant="danger"
+                  size="sm"
+                  disabled={isPending}
+                  className="bg-rose-600 hover:bg-rose-700 text-white"
+                >
+                  {isPending ? "Refus en cours..." : "Confirmer le Refus"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Equipment Modal */}
+      <EquipmentEditModal
+        isOpen={isEditOpen}
+        onClose={() => {
+          setIsEditOpen(false);
+          setEditingEquipment(null);
+        }}
+        equipment={editingEquipment}
+        onSuccess={(updated) => {
+          setEquipment((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
+          setActionMessage({ text: "Fiche matériel mise à jour avec succès." });
+          setTimeout(() => setActionMessage(null), 3000);
+        }}
+      />
     </div>
   );
 }

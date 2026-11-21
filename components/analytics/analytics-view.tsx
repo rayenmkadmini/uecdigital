@@ -38,6 +38,8 @@ const ACTION_LABELS: Record<string, { label: string; color: string }> = {
   APPROVE_EQUIPMENT_LOAN: { label: "Autorisation de prêt", color: "text-emerald-400" },
   RETURN_EQUIPMENT: { label: "Retour de matériel", color: "text-emerald-300" },
   UPLOAD_MEDIA_FILE: { label: "Import médiathèque", color: "text-cyan-300" },
+  CREATE_DEPARTMENT: { label: "Création d'un pôle", color: "text-uec-red" },
+  UPDATE_DEPARTMENT: { label: "Modification pôle", color: "text-uec-cyan" },
 };
 
 export function AnalyticsView({ data, userRole }: AnalyticsViewProps) {
@@ -52,7 +54,7 @@ export function AnalyticsView({ data, userRole }: AnalyticsViewProps) {
           <span>Analyses de Performance & Audit Opérationnel</span>
         </h1>
         <p className="text-xs text-slate-400 mt-1">
-          Indicateurs d'efficacité en temps réel agrégés sur l'ensemble de la base de données UEC.
+          Indicateurs d'efficacité en temps réel agrégés sur l'ensemble de la base de données PostgreSQL.
         </p>
       </div>
 
@@ -269,7 +271,7 @@ export function AnalyticsView({ data, userRole }: AnalyticsViewProps) {
                           </span>
                         </div>
                         <p className="text-[11px] text-slate-400 mt-0.5">
-                          Table: <span className="font-mono text-slate-300">{log.entity_type}</span>
+                          Entité: <span className="font-mono text-slate-300">{log.entity_type}</span>
                           {log.details?.title && (
                             <>
                               {" "}
@@ -288,7 +290,7 @@ export function AnalyticsView({ data, userRole }: AnalyticsViewProps) {
 
                     <div className="text-[11px] text-slate-500 font-mono shrink-0 flex items-center gap-1">
                       <Clock size={12} />
-                      {timeAgo}
+                      <span>{timeAgo}</span>
                     </div>
                   </div>
                 );

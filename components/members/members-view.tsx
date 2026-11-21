@@ -1,16 +1,34 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useTransition } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
-import { Users, Search, Shield, Building2, CheckCircle2, AlertCircle, X, ChevronRight, Settings } from "lucide-react";
+import {
+  Users,
+  Search,
+  Shield,
+  Building2,
+  CheckCircle2,
+  AlertCircle,
+  X,
+  Settings,
+  UserCheck,
+  UserX,
+  UserMinus,
+  Mail,
+} from "lucide-react";
 import type { MemberListItem } from "@/lib/data/members";
 import type { DepartmentWithStats } from "@/lib/data/departments";
 import type { UserRole } from "@/lib/auth/rbac";
-import { assignDepartmentMemberAction, updateMemberRoleAction } from "@/app/actions/members";
+import {
+  assignDepartmentMemberAction,
+  removeDepartmentMemberAction,
+  updateMemberRoleAction,
+  toggleMemberActiveStatusAction,
+} from "@/app/actions/members";
 
 interface MembersViewProps {
   members: MemberListItem[];
@@ -18,7 +36,12 @@ interface MembersViewProps {
   currentUserRole: UserRole;
 }
 
-export function MembersView({ members, departments, currentUserRole }: MembersViewProps) {
+export function MembersView({
+  members: initialMembers,
+  departments,
+  currentUserRole,
+}: MembersViewProps) {
+  const [members, setMembers] = useState<MemberListItem[]>(initialMembers);
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("ALL");
   const [deptFilter, setDeptFilter] = useState<string>("ALL");
@@ -27,8 +50,10 @@ export function MembersView({ members, departments, currentUserRole }: MembersVi
   const [selectedMember, setSelectedMember] = useState<MemberListItem | null>(null);
   const [targetDeptId, setTargetDeptId] = useState<string>("");
   const [targetRole, setTargetRole] = useState<UserRole>("MEMBER");
-  const [isPending, setIsPending] = useState(false);
+  const [isPending, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  const isSuperAdmin = currentUserRole === "SUPER_ADMIN";
 
   const openManageModal = (member: MemberListItem) => {
     setSelectedMember(member);
@@ -42,51 +67,130 @@ export function MembersView({ members, departments, currentUserRole }: MembersVi
     setFeedback(null);
   };
 
-  const handleUpdateRole = async () => {
+  const handleUpdateRole = () => {
     if (!selectedMember) return;
-    setIsPending(true);
     setFeedback(null);
-    try {
-      const res = await updateMemberRoleAction(selectedMember.id, targetRole);
-      if (res.success) {
-        setFeedback({ type: "success", message: res.message });
-        selectedMember.role = targetRole;
-      } else {
-        setFeedback({ type: "error", message: res.message });
+    startTransition(async () => {
+      try {
+        const res = await updateMemberRoleAction(selectedMember.id, targetRole);
+        if (res.success) {
+          setFeedback({ type: "success", message: res.message });
+          setMembers((prev) =>
+            prev.map((m) => (m.id === selectedMember.id ? { ...m, role: targetRole } : m))
+          );
+          setSelectedMember({ ...selectedMember, role: targetRole });
+        } else {
+          setFeedback({ type: "error", message: res.message });
+        }
+      } catch (err: any) {
+        setFeedback({ type: "error", message: err.message || "Erreur de modification" });
       }
-    } catch (err: any) {
-      setFeedback({ type: "error", message: err.message || "Erreur de modification" });
-    } finally {
-      setIsPending(false);
-    }
+    });
   };
 
-  const handleAssignDept = async () => {
+  const handleAssignDept = () => {
     if (!selectedMember || !targetDeptId) return;
-    setIsPending(true);
     setFeedback(null);
-    try {
-      const res = await assignDepartmentMemberAction(targetDeptId, selectedMember.id);
-      if (res.success) {
-        setFeedback({ type: "success", message: res.message });
-        const assignedDept = departments.find((d) => d.id === targetDeptId);
-        selectedMember.department_id = targetDeptId;
-        selectedMember.department_name = assignedDept?.name || "";
-      } else {
-        setFeedback({ type: "error", message: res.message });
+    startTransition(async () => {
+      try {
+        const res = await assignDepartmentMemberAction(targetDeptId, selectedMember.id);
+        if (res.success) {
+          setFeedback({ type: "success", message: res.message });
+          const assignedDept = departments.find((d) => d.id === targetDeptId);
+          setMembers((prev) =>
+            prev.map((m) =>
+              m.id === selectedMember.id
+                ? {
+                    ...m,
+                    department_id: targetDeptId,
+                    department_name: assignedDept?.name || null,
+                    department_code: assignedDept?.code || null,
+                  }
+                : m
+            )
+          );
+          setSelectedMember({
+            ...selectedMember,
+            department_id: targetDeptId,
+            department_name: assignedDept?.name || null,
+            department_code: assignedDept?.code || null,
+          });
+        } else {
+          setFeedback({ type: "error", message: res.message });
+        }
+      } catch (err: any) {
+        setFeedback({ type: "error", message: err.message || "Erreur d'assignation" });
       }
-    } catch (err: any) {
-      setFeedback({ type: "error", message: err.message || "Erreur d'assignation" });
-    } finally {
-      setIsPending(false);
+    });
+  };
+
+  const handleRemoveDept = () => {
+    if (!selectedMember || !selectedMember.department_id) return;
+    setFeedback(null);
+    startTransition(async () => {
+      try {
+        const res = await removeDepartmentMemberAction(
+          selectedMember.department_id!,
+          selectedMember.id
+        );
+        if (res.success) {
+          setFeedback({ type: "success", message: res.message });
+          setMembers((prev) =>
+            prev.map((m) =>
+              m.id === selectedMember.id
+                ? { ...m, department_id: null, department_name: null, department_code: null }
+                : m
+            )
+          );
+          setSelectedMember({
+            ...selectedMember,
+            department_id: null,
+            department_name: null,
+            department_code: null,
+          });
+          setTargetDeptId("");
+        } else {
+          setFeedback({ type: "error", message: res.message });
+        }
+      } catch (err: any) {
+        setFeedback({ type: "error", message: err.message || "Erreur de désassignation" });
+      }
+    });
+  };
+
+  const handleToggleStatus = (member: MemberListItem) => {
+    const actionLabel = member.is_active ? "suspendre" : "réactiver";
+    if (!confirm(`Confirmez-vous vouloir ${actionLabel} le compte de ${member.full_name} ?`)) {
+      return;
     }
+
+    startTransition(async () => {
+      try {
+        const res = await toggleMemberActiveStatusAction(member.id, !member.is_active);
+        if (res.success) {
+          setMembers((prev) =>
+            prev.map((m) => (m.id === member.id ? { ...m, is_active: !member.is_active } : m))
+          );
+          if (selectedMember?.id === member.id) {
+            setSelectedMember({ ...selectedMember, is_active: !member.is_active });
+          }
+          setFeedback({ type: "success", message: res.message });
+        } else {
+          setFeedback({ type: "error", message: res.message });
+        }
+      } catch (err: any) {
+        setFeedback({ type: "error", message: err.message || "Erreur de changement de statut" });
+      }
+    });
   };
 
   const filtered = members.filter((m) => {
+    const s = searchTerm.toLowerCase().trim();
     const matchSearch =
-      m.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      m.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (m.department_name && m.department_name.toLowerCase().includes(searchTerm.toLowerCase()));
+      !s ||
+      m.full_name.toLowerCase().includes(s) ||
+      m.email.toLowerCase().includes(s) ||
+      (m.department_name && m.department_name.toLowerCase().includes(s));
     const matchRole = roleFilter === "ALL" || m.role === roleFilter;
     const matchDept =
       deptFilter === "ALL" ||
@@ -104,8 +208,8 @@ export function MembersView({ members, departments, currentUserRole }: MembersVi
             <span>Membres & Gouvernance du Pôle Digital</span>
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Gouvernance stricte à 3 niveaux : Super Admin, Coordinateurs d'équipe, Membres.
-            Accès d'administration en direct sur la base de données ({members.length} membres répertoriés).
+            Gouvernance matricielle à 3 niveaux : Super Admin, Coordinateurs de pôle, Membres.
+            Données synchronisées en temps réel avec PostgreSQL ({members.length} membres répertoriés).
           </p>
         </div>
       </div>
@@ -113,12 +217,12 @@ export function MembersView({ members, departments, currentUserRole }: MembersVi
       {/* Filters bar */}
       <div className="flex flex-col md:flex-row gap-3">
         <div className="relative flex-1">
-          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 rtl:left-auto rtl:right-3.5" />
           <Input
             placeholder="Rechercher par nom, email ou pôle..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-9"
+            className="pl-9 rtl:pl-3 rtl:pr-9"
           />
         </div>
 
@@ -190,30 +294,56 @@ export function MembersView({ members, departments, currentUserRole }: MembersVi
                         </Badge>
                         <span
                           className={`h-2 w-2 rounded-full ${
-                            member.is_active ? "bg-emerald-400" : "bg-slate-500"
+                            member.is_active ? "bg-emerald-400" : "bg-rose-500"
                           }`}
-                          title={member.is_active ? "Compte actif" : "Compte inactif"}
+                          title={member.is_active ? "Compte actif" : "Compte suspendu"}
                         />
+                        {!member.is_active && (
+                          <span className="text-[10px] text-rose-400 font-semibold bg-rose-950/60 border border-rose-800/40 px-1.5 py-0.2 rounded">
+                            Suspendu
+                          </span>
+                        )}
                       </div>
-                      <p className="text-xs text-slate-400 mt-0.5">{member.email}</p>
+                      <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5">
+                        <Mail size={12} className="text-slate-500" />
+                        <span>{member.email}</span>
+                      </p>
                       <p className="text-[11px] text-uec-cyan font-medium flex items-center gap-1 mt-0.5">
                         <Building2 size={11} />
-                        <span>{member.department_name || "Sans département"}</span>
+                        <span>{member.department_name || "Sans pôle assigné"}</span>
                       </p>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-2 self-end sm:self-center">
-                    {currentUserRole === "SUPER_ADMIN" && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-xs flex items-center gap-1.5"
-                        onClick={() => openManageModal(member)}
-                      >
-                        <Settings size={13} className="text-uec-red" />
-                        <span>Gérer Accès</span>
-                      </Button>
+                    {isSuperAdmin && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={isPending}
+                          onClick={() => handleToggleStatus(member)}
+                          className={`text-xs flex items-center gap-1 ${
+                            member.is_active
+                              ? "text-slate-400 hover:text-rose-400"
+                              : "text-emerald-400 hover:text-emerald-300"
+                          }`}
+                          title={member.is_active ? "Suspendre l'accès" : "Réactiver le compte"}
+                        >
+                          {member.is_active ? <UserX size={13} /> : <UserCheck size={13} />}
+                          <span>{member.is_active ? "Suspendre" : "Activer"}</span>
+                        </Button>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-xs flex items-center gap-1.5 text-slate-300 hover:text-white"
+                          onClick={() => openManageModal(member)}
+                        >
+                          <Settings size={13} className="text-uec-red" />
+                          <span>Gérer Accès</span>
+                        </Button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -266,7 +396,7 @@ export function MembersView({ members, departments, currentUserRole }: MembersVi
                   <select
                     value={targetRole}
                     onChange={(e) => setTargetRole(e.target.value as UserRole)}
-                    className="flex-1 bg-[#172033] border border-[#27354F] text-white text-xs rounded-lg px-3 py-2"
+                    className="flex-1 bg-[#172033] border border-[#27354F] text-white text-xs rounded-lg px-3 py-2 focus:border-uec-red focus:outline-none"
                   >
                     <option value="MEMBER">MEMBER (Membre de production)</option>
                     <option value="COORDINATOR">COORDINATOR (Coordinateur de pôle)</option>
@@ -277,6 +407,7 @@ export function MembersView({ members, departments, currentUserRole }: MembersVi
                     size="sm"
                     disabled={isPending || targetRole === selectedMember.role}
                     onClick={handleUpdateRole}
+                    className="bg-uec-red hover:bg-uec-red/90 text-white"
                   >
                     Changer
                   </Button>
@@ -292,7 +423,7 @@ export function MembersView({ members, departments, currentUserRole }: MembersVi
                   <select
                     value={targetDeptId}
                     onChange={(e) => setTargetDeptId(e.target.value)}
-                    className="flex-1 bg-[#172033] border border-[#27354F] text-white text-xs rounded-lg px-3 py-2"
+                    className="flex-1 bg-[#172033] border border-[#27354F] text-white text-xs rounded-lg px-3 py-2 focus:border-uec-red focus:outline-none"
                   >
                     <option value="">Sélectionner un pôle...</option>
                     {departments.map((d) => (
@@ -311,6 +442,22 @@ export function MembersView({ members, departments, currentUserRole }: MembersVi
                   </Button>
                 </div>
               </div>
+
+              {/* Remove from current pole if any */}
+              {selectedMember.department_id && (
+                <div className="pt-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={isPending}
+                    onClick={handleRemoveDept}
+                    className="text-xs text-rose-400 hover:text-rose-300 w-full justify-start"
+                  >
+                    <UserMinus size={13} className="mr-1.5" />
+                    <span>Désassigner du pôle actuel ({selectedMember.department_name})</span>
+                  </Button>
+                </div>
+              )}
             </div>
 
             <div className="mt-6 pt-4 border-t border-[#1F2937] flex justify-end">

@@ -157,8 +157,9 @@ export default function SettingsPage() {
                         ? "coordinator"
                         : "member"
                     }
+                    size="sm"
                   >
-                    {t(`roles.${role}`)}
+                    {role ? t(`roles.${role}`) : "Membre"}
                   </Badge>
                 </div>
               </div>
@@ -166,118 +167,111 @@ export default function SettingsPage() {
 
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Bio / Rôle au sein du pôle
+                Bio / Présentation au sein de l'UEC
               </label>
               <textarea
-                rows={2}
+                rows={3}
                 value={bio}
                 onChange={(e) => setBio(e.target.value)}
-                placeholder="Ex: Passionné par la création visuelle et supporter inconditionnel..."
-                className="w-full bg-[#111827] text-xs text-white placeholder-slate-500 rounded-lg p-2.5 border border-[#1F2937] focus:border-uec-blue focus:outline-none"
+                placeholder="Rédigez quelques lignes sur votre parcours, spécialités graphiques ou missions..."
+                className="w-full bg-[#0B1020] text-xs text-white placeholder-slate-500 rounded-lg p-3 border border-[#1F2937] focus:border-uec-blue focus:outline-none resize-none leading-relaxed"
               />
             </div>
 
-            <Button type="submit" variant="primary" size="sm" disabled={isPending}>
-              <Save size={14} className="mr-1" />
-              {isPending ? "Enregistrement..." : "Enregistrer Modifications"}
-            </Button>
+            <div className="flex justify-end pt-2">
+              <Button type="submit" variant="primary" size="sm" disabled={isPending} className="bg-uec-red hover:bg-uec-red/90 text-white">
+                <Save size={14} className="mr-1.5" />
+                <span>{isPending ? "Enregistrement..." : "Enregistrer les modifications"}</span>
+              </Button>
+            </div>
           </form>
         </CardContent>
       </Card>
 
-      {/* Language Preference */}
+      {/* Language Preferences */}
       <Card>
         <CardHeader>
           <CardTitle className="text-white flex items-center gap-2">
-            <Globe size={18} className="text-uec-blue" />
-            <span>Langue d'Affichage & Sens de Lecture</span>
+            <Globe size={18} className="text-uec-red" />
+            <span>Langue & Paramètres Régionaux</span>
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-4">
           <p className="text-xs text-slate-400">
-            L'Espace Digital supporte nativement le Français, l'Arabe (avec disposition inversée RTL) et l'Anglais.
+            Choisissez la langue principale de l'interface. L'arabe activera la mise en page RTL (de droite à gauche).
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {[
-              {
-                code: "fr" as Locale,
-                label: "Français",
-                flag: "🇫🇷",
-                desc: "Langue par défaut (LTR)",
-              },
-              {
-                code: "ar" as Locale,
-                label: "العربية",
-                flag: "🇹🇳",
-                desc: "Native RTL (من اليمين لليسار)",
-              },
-              {
-                code: "en" as Locale,
-                label: "English",
-                flag: "🇬🇧",
-                desc: "International (LTR)",
-              },
-            ].map((item) => (
+              { code: "fr", label: "Français", flag: "🇫🇷", desc: "Langue par défaut (LTR)" },
+              { code: "ar", label: "العربية", flag: "🇹🇳", desc: "Arabe Clubiste (RTL)" },
+              { code: "en", label: "English", flag: "🇬🇧", desc: "International (LTR)" },
+            ].map((lang) => (
               <button
-                key={item.code}
-                type="button"
-                onClick={() => handleLanguageChange(item.code)}
-                className={`p-3.5 rounded-xl border text-left rtl:text-right transition-all ${
-                  locale === item.code
-                    ? "bg-slate-800 border-uec-red shadow-md ring-1 ring-uec-red"
-                    : "bg-[#172033] border-[#27354F] hover:border-slate-600"
+                key={lang.code}
+                onClick={() => handleLanguageChange(lang.code as Locale)}
+                className={`p-3.5 rounded-xl border text-left rtl:text-right transition-all flex flex-col justify-between ${
+                  locale === lang.code
+                    ? "bg-uec-red/10 border-uec-red text-white shadow-md shadow-red-950/20"
+                    : "bg-[#0B1020] border-[#1F2937] text-slate-400 hover:text-white hover:border-slate-700"
                 }`}
               >
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">{item.flag}</span>
-                  <span className="text-xs font-bold text-white">{item.label}</span>
+                <div className="flex items-center justify-between w-full mb-1">
+                  <span className="text-xl">{lang.flag}</span>
+                  {locale === lang.code && (
+                    <span className="text-[10px] font-bold text-uec-red bg-uec-red/20 px-2 py-0.5 rounded-full">
+                      Active
+                    </span>
+                  )}
                 </div>
-                <p className="text-[10px] text-slate-400 mt-1">{item.desc}</p>
+                <div>
+                  <h4 className="text-xs font-bold text-white">{lang.label}</h4>
+                  <p className="text-[10px] text-slate-500 mt-0.5">{lang.desc}</p>
+                </div>
               </button>
             ))}
           </div>
         </CardContent>
       </Card>
 
-      {/* Notifications Preferences */}
+      {/* Notification Preferences */}
       <Card>
         <CardHeader>
           <CardTitle className="text-white flex items-center gap-2">
-            <Bell size={18} className="text-uec-red" />
-            <span>Préférences de Notifications</span>
+            <Bell size={18} className="text-amber-400" />
+            <span>Préférences de Notification</span>
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex items-center justify-between p-3 rounded-xl bg-[#0B1020]/60 border border-[#1F2937]">
-            <div>
-              <h4 className="text-xs font-bold text-white">Notifications par Email</h4>
-              <p className="text-[11px] text-slate-400">
-                Recevoir un récapitulatif lors de l'assignation de tâches ou d'approbations.
-              </p>
+          <label className="flex items-center justify-between p-3 rounded-lg bg-[#0B1020] border border-[#1F2937] cursor-pointer">
+            <div className="space-y-0.5">
+              <span className="text-xs font-semibold text-white block">Notifications par Email</span>
+              <span className="text-[11px] text-slate-400 block">
+                Recevoir les alertes d'assignation de tâche, de validation de livrable et de convocations.
+              </span>
             </div>
             <input
               type="checkbox"
               checked={emailNotifs}
               onChange={(e) => handleNotifToggle("email", e.target.checked)}
-              className="rounded bg-[#0B1020] border-slate-700 text-uec-red focus:ring-uec-red cursor-pointer"
+              className="rounded border-[#1F2937] text-uec-red focus:ring-uec-red h-4 w-4"
             />
-          </div>
+          </label>
 
-          <div className="flex items-center justify-between p-3 rounded-xl bg-[#0B1020]/60 border border-[#1F2937]">
-            <div>
-              <h4 className="text-xs font-bold text-white">Notifications In-App</h4>
-              <p className="text-[11px] text-slate-400">
-                Afficher les badges et alertes en direct dans la barre de navigation supérieure.
-              </p>
+          <label className="flex items-center justify-between p-3 rounded-lg bg-[#0B1020] border border-[#1F2937] cursor-pointer">
+            <div className="space-y-0.5">
+              <span className="text-xs font-semibold text-white block">Notifications In-App</span>
+              <span className="text-[11px] text-slate-400 block">
+                Activer la cloche de notification et le flux d'événements en direct.
+              </span>
             </div>
             <input
               type="checkbox"
               checked={pushNotifs}
               onChange={(e) => handleNotifToggle("push", e.target.checked)}
-              className="rounded bg-[#0B1020] border-slate-700 text-uec-red focus:ring-uec-red cursor-pointer"
+              className="rounded border-[#1F2937] text-uec-red focus:ring-uec-red h-4 w-4"
             />
-          </div>
+          </label>
         </CardContent>
       </Card>
     </div>

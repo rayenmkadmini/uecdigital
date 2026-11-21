@@ -9,7 +9,12 @@ import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { CommandPalette } from "@/components/shell/command-palette";
 import { createClient } from "@/lib/supabase/client";
-import { markAllNotificationsAsReadAction } from "@/app/actions/notifications";
+import {
+  markNotificationAsReadAction,
+  markAllNotificationsAsReadAction,
+  deleteNotificationAction,
+  clearAllNotificationsAction,
+} from "@/app/actions/notifications";
 import {
   Menu,
   Bell,
@@ -20,6 +25,8 @@ import {
   ChevronDown,
   Shield,
   Command,
+  Check,
+  Trash2,
 } from "lucide-react";
 
 interface AppHeaderProps {
@@ -59,7 +66,7 @@ export function AppHeader({ onOpenMobileMenu, collapsed = false }: AppHeaderProp
       const { data } = await (supabase.from("notifications") as any)
         .select("*")
         .order("created_at", { ascending: false })
-        .limit(10);
+        .limit(15);
       if (data) {
         setNotifications(data);
         setUnreadCount(data.filter((n: any) => !n.is_read).length);
@@ -72,6 +79,29 @@ export function AppHeader({ onOpenMobileMenu, collapsed = false }: AppHeaderProp
   const handleMarkAllRead = async () => {
     await markAllNotificationsAsReadAction();
     setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    setUnreadCount(0);
+  };
+
+  const handleMarkSingleRead = async (notificationId: string) => {
+    await markNotificationAsReadAction(notificationId);
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === notificationId ? { ...n, is_read: true } : n))
+    );
+    setUnreadCount((prev) => Math.max(0, prev - 1));
+  };
+
+  const handleDeleteNotification = async (notificationId: string) => {
+    await deleteNotificationAction(notificationId);
+    setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
+    setUnreadCount((prev) => {
+      const wasUnread = notifications.find((n) => n.id === notificationId && !n.is_read);
+      return wasUnread ? Math.max(0, prev - 1) : prev;
+    });
+  };
+
+  const handleClearAllNotifications = async () => {
+    await clearAllNotificationsAction();
+    setNotifications([]);
     setUnreadCount(0);
   };
 
@@ -173,10 +203,10 @@ export function AppHeader({ onOpenMobileMenu, collapsed = false }: AppHeaderProp
                       setLocale(lang.code);
                       setIsLangOpen(false);
                     }}
-                    className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left rtl:text-right hover:bg-white/5 transition-colors ${
+                    className={`w-full text-left rtl:text-right px-3.5 py-2 text-xs flex items-center justify-between transition-colors ${
                       locale === lang.code
-                        ? "text-uec-red font-bold bg-white/[0.04]"
-                        : "text-slate-300"
+                        ? "text-white font-bold bg-uec-red/20"
+                        : "text-slate-400 hover:text-white hover:bg-white/5"
                     }`}
                   >
                     <span className="flex items-center gap-2">
@@ -224,14 +254,24 @@ export function AppHeader({ onOpenMobileMenu, collapsed = false }: AppHeaderProp
                       </span>
                     )}
                   </div>
-                  {unreadCount > 0 && (
-                    <button
-                      onClick={handleMarkAllRead}
-                      className="text-[11px] text-uec-cyan font-semibold hover:underline"
-                    >
-                      Tout marquer comme lu
-                    </button>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {unreadCount > 0 && (
+                      <button
+                        onClick={handleMarkAllRead}
+                        className="text-[11px] text-uec-cyan font-semibold hover:underline"
+                      >
+                        Tout lire
+                      </button>
+                    )}
+                    {notifications.length > 0 && (
+                      <button
+                        onClick={handleClearAllNotifications}
+                        className="text-[11px] text-slate-500 hover:text-rose-400 transition-colors"
+                      >
+                        Vider
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="py-2 space-y-2 text-xs max-h-72 overflow-y-auto">
@@ -244,22 +284,40 @@ export function AppHeader({ onOpenMobileMenu, collapsed = false }: AppHeaderProp
                     notifications.map((n) => (
                       <div
                         key={n.id}
-                        className={`p-2.5 rounded-xl border transition-colors ${
+                        className={`p-2.5 rounded-xl border transition-colors group relative ${
                           n.is_read
                             ? "bg-white/[0.02] border-white/5 text-slate-400"
                             : "bg-[#172033]/80 border-blue-600/40 text-slate-200 shadow-sm shadow-black/40"
                         }`}
                       >
                         <div className="flex items-center justify-between text-[10px] mb-1">
-                          <span className="font-bold text-uec-cyan truncate max-w-[180px]">{n.title}</span>
-                          <span className="text-slate-500 shrink-0">
-                            {new Date(n.created_at).toLocaleDateString("fr-FR", {
-                              day: "numeric",
-                              month: "short",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </span>
+                          <span className="font-bold text-uec-cyan truncate max-w-[160px]">{n.title}</span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-slate-500">
+                              {new Date(n.created_at).toLocaleDateString("fr-FR", {
+                                day: "numeric",
+                                month: "short",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </span>
+                            {!n.is_read && (
+                              <button
+                                onClick={() => handleMarkSingleRead(n.id)}
+                                title="Marquer comme lu"
+                                className="p-0.5 text-slate-400 hover:text-emerald-400 rounded transition-colors"
+                              >
+                                <Check size={11} />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleDeleteNotification(n.id)}
+                              title="Supprimer la notification"
+                              className="p-0.5 text-slate-500 hover:text-rose-400 rounded transition-colors"
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          </div>
                         </div>
                         <p className="text-xs text-white/90 leading-relaxed">{n.message}</p>
                       </div>
